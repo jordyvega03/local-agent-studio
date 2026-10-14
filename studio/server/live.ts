@@ -8,6 +8,7 @@ import type { Config } from "./config.ts";
 import type { Metrics } from "./metrics.ts";
 import { listProjects, registeredProjects, RUN_NAME, runState, stepLogPath } from "./runs.ts";
 import { systemState } from "./system.ts";
+import { readTokens } from "./tokens.ts";
 import type { ClientMessage, MetricsNow, RunState, ServerMessage } from "../shared/types.ts";
 
 const TAIL_BYTES = 256 * 1024;     // al abrir un paso se manda como mucho esto
@@ -63,7 +64,7 @@ function parseMessage(raw: string): ClientMessage | null {
 export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
   let sub: Sub | null = null;
   let cursor: LogCursor | null = null;
-  const last = { run: "", projects: "", system: "" };
+  const last = { run: "", projects: "", system: "", tokens: "" };
 
   const send = (m: ServerMessage) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m)); };
   const sendIfChanged = (key: keyof typeof last, m: ServerMessage) => {
@@ -97,6 +98,7 @@ export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
   };
   const tickProjects = () => sendIfChanged("projects", { type: "projects", data: listProjects(cfg.aiHome) });
   const tickSystem = async () => sendIfChanged("system", { type: "system", data: await systemState(cfg) });
+  const tickTokens = () => sendIfChanged("tokens", { type: "tokens", data: readTokens(cfg) });
 
   socket.on("message", (raw) => {
     const m = parseMessage(String(raw));
@@ -115,6 +117,7 @@ export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
     setInterval(tickRun, 1000),
     setInterval(tickProjects, 5000),
     setInterval(() => void tickSystem(), 3000),
+    setInterval(tickTokens, 1000),
   ];
   // Métricas: el histórico al conectar y luego cada muestra del recolector compartido.
   const onSample = (data: MetricsNow) => send({ type: "metrics", data });
@@ -123,5 +126,6 @@ export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
 
   socket.on("close", () => { timers.forEach(clearInterval); metrics.off("sample", onSample); });
   tickProjects();
+  tickTokens();
   void tickSystem();
 }

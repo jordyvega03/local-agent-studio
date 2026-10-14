@@ -1,9 +1,9 @@
 // Vista de una sesión (un plan): etapas, análisis de Opus, pasos del ejecutor y revisión.
-import { ArrowRight, Brain, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
+import { ArrowRight, Brain, Coins, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
   MessageSquare, ScanSearch, Wrench } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { RunState, Status } from "../../../shared/types.ts";
-import { clock, duration, secondsSince } from "../format.ts";
+import { clock, compact, duration, secondsSince, tokS } from "../format.ts";
 import { Card, Code, cx, Empty, StatusBadge, StatusIcon } from "./ui.tsx";
 
 const NODE_RING: Record<Status, string> = {
@@ -111,6 +111,11 @@ export function ExecutionCard({ run, selected, onSelect }: { run: RunState; sele
                   <div className="min-w-0">
                     <div className="font-medium">{s.n}. {s.title || `Paso ${s.n}`}</div>
                     {s.files.length > 0 && <div className="font-mono text-[11px] break-all text-muted">{s.files.join("  ")}</div>}
+                    {s.tokens && (
+                      <div className="text-[11px] text-muted tabular-nums">
+                        {compact(s.tokens.output)} tokens de salida · {tokS(s.tokens.tok_s)} · {s.tokens.requests} {s.tokens.requests === 1 ? "petición" : "peticiones"}
+                      </div>
+                    )}
                     {s.commits?.map((c) => (
                       <div key={c} className="flex items-center gap-1 font-mono text-[11px] break-all text-muted">
                         <GitCommitHorizontal className="size-3 shrink-0" />{c}
@@ -137,6 +142,45 @@ export function ReviewCard({ run }: { run: RunState }) {
       {r.text ? <pre className="max-h-96 overflow-auto rounded-lg bg-panel-2 p-3 font-mono text-xs whitespace-pre-wrap">{r.text}</pre>
         : r.status === "running" ? <Empty>Opus está revisando el diff…</Empty>
         : <Empty>Ejecuta <Code>ai review &lt;proyecto&gt;</Code> cuando termine la ejecución.</Empty>}
+    </Card>
+  );
+}
+
+/** Resumen de tokens de la sesión: ejecutor (medidor) y Opus (plan + revisión). */
+export function SessionTokensCard({ run }: { run: RunState }) {
+  const { executor: x, opus: o } = run.tokens;
+  const row = (label: string, value: string) => <><dt className="text-muted">{label}</dt><dd className="text-right tabular-nums">{value}</dd></>;
+  return (
+    <Card title="Tokens de la sesión" icon={<Coins className="size-4 text-muted" />}>
+      {!x && !o ? <Empty>Sin datos de tokens: los planes y ejecuciones anteriores al medidor no los registraron.</Empty> : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <div className="mb-1 text-xs font-semibold">Ejecutor ({run.exec.model ?? "local"})</div>
+            {x ? (
+              <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                {row("Peticiones", String(x.requests))}
+                {row("Prompt", compact(x.prompt))}
+                {row("Salida", compact(x.output))}
+                {row("Velocidad", tokS(x.tok_s))}
+                {row("Tiempo del modelo", duration(x.total_ms / 1000))}
+              </dl>
+            ) : <Empty>Sin peticiones medidas.</Empty>}
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-semibold">Opus (plan + revisión)</div>
+            {o ? (
+              <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                {row("Entrada", compact(o.input_tokens))}
+                {row("Salida", compact(o.output_tokens))}
+                {row("Caché leída", compact(o.cache_read_tokens))}
+                {row("Caché creada", compact(o.cache_creation_tokens))}
+                {o.cost_usd != null && row("Coste equivalente API", `$${o.cost_usd.toFixed(2)}`)}
+              </dl>
+            ) : <Empty>Sin datos de Opus en esta sesión.</Empty>}
+          </div>
+        </div>
+      )}
+      {o?.cost_usd != null && <p className="mt-2 text-[11px] text-muted">El coste es lo que costaría por API; con tu suscripción de Claude no se cobra aparte.</p>}
     </Card>
   );
 }

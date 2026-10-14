@@ -39,3 +39,15 @@ export const pct = (n: number | null | undefined) => (n == null ? "—" : `${Mat
 
 export const hhmm = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 export const hhmmss = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+/** 1234 -> "1,2 k", 2500000 -> "2,5 M" (para tokens). */
+export function compact(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)} M`;
+  if (Math.abs(n) >= 1e4) return `${Math.round(n / 1e3)} k`;
+  if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)} k`;
+  return String(Math.round(n));
+}
+
+export const tokS = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(1)} tok/s`);
+export const ms = (v: number | null | undefined) => (v == null ? "—" : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);

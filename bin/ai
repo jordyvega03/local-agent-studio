@@ -21,6 +21,8 @@ PID_FILE="$RUN_DIR/ollama.pid"
 DASH_PID_FILE="$RUN_DIR/dashboard.pid"
 STUDIO_PID_FILE="$RUN_DIR/studio.pid"
 STUDIO_TOKEN_FILE="$RUN_DIR/studio.token"   # lo crea el servidor en cada arranque
+METER_PID_FILE="$RUN_DIR/meter.pid"
+METER_CTX_FILE="$RUN_DIR/meter-context.json"  # proyecto/plan/paso de la petición en curso
 PROJECTS_FILE="$RUN_DIR/projects"            # proyectos que puede mostrar el panel
 AIWATCH="$AI_HOME/lib/aiwatch.py"
 mkdir -p "$RUN_DIR" "$LOG_DIR"
@@ -73,7 +75,7 @@ assert_safe_mount() {
 compose() {
   PROJECT_DIR="${PROJECT_DIR:-$AI_HOME/run}" \
   AIDER_IMAGE="$AIDER_IMAGE" EXECUTOR_MEM_LIMIT="$EXECUTOR_MEM_LIMIT" \
-  EXECUTOR_CPUS="$EXECUTOR_CPUS" OLLAMA_PORT="$OLLAMA_PORT" \
+  EXECUTOR_CPUS="$EXECUTOR_CPUS" OLLAMA_PORT="$(executor_ollama_port)" \
   GIT_NAME="$(git config --global user.name || echo ai-agent)" \
   GIT_EMAIL="$(git config --global user.email || echo ai-agent@localhost)" \
     docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"
@@ -139,6 +141,39 @@ start_ollama() {
   die "Ollama no respondió. Revisa: ai logs"
 }
 
+# --- Medidor de tokens (lib/aiwatch.py meter) ---------------------------------
+meter_enabled() { [ "$TOKEN_METER" = 1 ] && command -v python3 >/dev/null; }
+meter_running() { [ -f "$METER_PID_FILE" ] && kill -0 "$(cat "$METER_PID_FILE")" 2>/dev/null; }
+
+# Puerto al que habla Aider desde el contenedor: el medidor si está activo, si no Ollama.
+executor_ollama_port() {
+  if meter_enabled && meter_running; then echo "$TOKEN_METER_PORT"; else echo "$OLLAMA_PORT"; fi
+}
+
+start_meter() {
+  meter_enabled && ! meter_running || return 0
+  info "Iniciando el medidor de tokens en 127.0.0.1:${TOKEN_METER_PORT}…"
+  nohup python3 "$AIWATCH" meter "$AI_HOME" "$TOKEN_METER_PORT" "$OLLAMA_URL" >>"$LOG_DIR/meter.log" 2>&1 &
+  echo $! >"$METER_PID_FILE"
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    curl -sf -m 1 "http://127.0.0.1:$TOKEN_METER_PORT/api/version" >/dev/null 2>&1 && { ok "Medidor listo"; return 0; }
+    sleep 0.5
+  done
+  warn "El medidor no arrancó (revisa $LOG_DIR/meter.log). Aider hablará directo con Ollama."
+  stop_meter
+}
+
+stop_meter() {
+  if meter_running; then kill "$(cat "$METER_PID_FILE")" && ok "Medidor detenido"; fi
+  rm -f "$METER_PID_FILE" "$METER_CTX_FILE"
+}
+
+meter_context() {  # meter_context [clave=valor ...]   (sin argumentos: borra el contexto)
+  meter_enabled || return 0
+  python3 "$AIWATCH" context "$METER_CTX_FILE" "$@" 2>/dev/null || true
+}
+
 unload_models() {
   ollama_running || return 0
   local m
@@ -181,6 +216,7 @@ cmd_up() {
   ensure_docker
   docker image inspect "$AIDER_IMAGE" >/dev/null 2>&1 || { info "Descargando imagen ${AIDER_IMAGE}…"; docker pull "$AIDER_IMAGE"; }
   start_ollama
+  start_meter
   if ! model_installed "$EXECUTOR_MODEL"; then
     info "El modelo $EXECUTOR_MODEL no está descargado. Descargando (puede tardar)…"
     OLLAMA_HOST="$OLLAMA_HOST" ollama pull "$EXECUTOR_MODEL"
@@ -197,6 +233,7 @@ cmd_down() {
   docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" | xargs -r docker rm -f >/dev/null 2>&1 || true
   unload_models
   stop_ollama
+  stop_meter
   stop_dashboard
   stop_studio
   if [ "$quit_docker" = 1 ]; then
@@ -227,6 +264,8 @@ cmd_status() {
   echo "  ejecutor:     $EXECUTOR_MODEL"
   echo "  planificador: $PLANNER_MODEL (Claude Code)"
   echo "  contexto:     $OLLAMA_CONTEXT_LENGTH tokens · keep_alive $OLLAMA_KEEP_ALIVE"
+  if meter_running; then echo "  medidor:      127.0.0.1:$TOKEN_METER_PORT (tokens en logs/tokens.jsonl)"
+  elif meter_enabled; then echo "  medidor:      detenido (ai up lo arranca)"; else echo "  medidor:      desactivado (TOKEN_METER=0)"; fi
   if dashboard_running; then echo "  panel:        http://127.0.0.1:$DASHBOARD_PORT/"; else echo "  panel:        detenido (ai dashboard)"; fi
   if studio_running; then echo "  studio:       http://127.0.0.1:$STUDIO_PORT/ (ai studio para abrirlo)"; else echo "  studio:       detenido (ai studio)"; fi
   echo "${c_dim}── Memoria del Mac ────────────────────${c_off}"
@@ -333,6 +372,8 @@ cmd_exec() {
   if [ "$interactive" = 1 ]; then
     info "Chat interactivo con el plan cargado (solo lectura): $rel"
     ai_event exec_started mode=interactive model="$EXECUTOR_MODEL" branch="$branch" from=1
+    meter_context project="$dir" run="$name" agent=interactive
+    trap 'meter_context' EXIT
     run_container executor "$dir" --model "$model" --read "$rel"
     ai_event exec_done
     return
@@ -341,7 +382,7 @@ cmd_exec() {
   STEPS_TMP="$(mktemp -d "$dir/.ai/.steps.XXXX")"
   EXEC_STATE=running
   # Al salir: borra los pasos temporales y, si se cortó (Ctrl+C), lo deja registrado.
-  trap 'rm -rf "$STEPS_TMP"; if [ "$EXEC_STATE" = running ]; then ai_event exec_aborted; fi' EXIT
+  trap 'rm -rf "$STEPS_TMP"; meter_context; if [ "$EXEC_STATE" = running ]; then ai_event exec_aborted; fi' EXIT
   local tmp="$STEPS_TMP"
   local total; total="$(split_steps "$plan" "$tmp")"
   [ "$total" -gt 0 ] || { EXEC_STATE=failed; die "El plan no tiene secciones '### Paso N'. Usa: ai exec $(basename "$dir") -i"; }
@@ -358,6 +399,7 @@ cmd_exec() {
     before="$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)"
     t0="$(date +%s)"
     ai_event step_started n="$n" title="$title" files="$(echo $files)"
+    meter_context project="$dir" run="$name" step="$n" agent=executor
     # shellcheck disable=SC2086
     if run_logged "$slog" executor "$dir" --model "$model" --yes-always --no-suggest-shell-commands \
       --read "$rel" $files \
@@ -383,6 +425,8 @@ $(cat "$step")"; then
 cmd_chat() {
   local dir; dir="$(resolve_project "${1:-}")"; shift || true
   cmd_up --no-warm >/dev/null
+  meter_context project="$dir" agent=chat
+  trap 'meter_context' EXIT
   run_container executor "$dir" --model "ollama_chat/$EXECUTOR_MODEL" "$@"
 }
 
@@ -390,6 +434,8 @@ cmd_architect() {
   local dir; dir="$(resolve_project "${1:-}")"; shift || true
   [ -n "${ANTHROPIC_API_KEY:-}" ] || die "ai architect necesita ANTHROPIC_API_KEY exportada (export ANTHROPIC_API_KEY=...). Sin API key usa: ai plan + ai exec"
   cmd_up --no-warm >/dev/null
+  meter_context project="$dir" agent=architect
+  trap 'meter_context' EXIT
   run_container architect "$dir" --architect --model "$ARCHITECT_MODEL" \
     --editor-model "ollama_chat/$EXECUTOR_MODEL" "$@"
 }
@@ -407,10 +453,14 @@ cmd_review() {
   fi
   info "Opus revisando el diff $base...HEAD de $(basename "$dir")…"
   ai_event review_started base="$base"
-  if (cd "$dir" && git diff "$base...HEAD" | claude -p \
-    "Revisa este diff hecho por un modelo local siguiendo el plan $planref. Señala bugs, pasos del plan no cumplidos y problemas de seguridad. Sé concreto (archivo:línea). Responde en español." \
-    --model "$PLANNER_MODEL" \
-    --allowedTools "Read" "Glob" "Grep" --disallowedTools "Edit" "Write" "Bash" | tee "$out"); then
+  local prompt="Revisa este diff hecho por un modelo local siguiendo el plan $planref. Señala bugs, pasos del plan no cumplidos y problemas de seguridad. Sé concreto (archivo:línea). Responde en español."
+  if [ -n "$EVENT_LOG" ] && command -v python3 >/dev/null; then
+    # Salida JSON: aiwatch imprime la revisión, la guarda y registra los tokens de Opus.
+    (cd "$dir" && git diff "$base...HEAD" | claude -p "$prompt" --model "$PLANNER_MODEL" --output-format json \
+      --allowedTools "Read" "Glob" "Grep" --disallowedTools "Edit" "Write" "Bash" \
+      | python3 "$AIWATCH" review-out "$EVENT_LOG" "$out") || die "La revisión falló."
+  elif (cd "$dir" && git diff "$base...HEAD" | claude -p "$prompt" --model "$PLANNER_MODEL" \
+      --allowedTools "Read" "Glob" "Grep" --disallowedTools "Edit" "Write" "Bash" | tee "$out"); then
     ai_event review_done
   else
     ai_event review_failed; die "La revisión falló."

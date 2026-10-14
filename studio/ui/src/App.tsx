@@ -2,21 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RunState } from "../../shared/types.ts";
 import { STATUS_LABEL } from "./format.ts";
 import { useLive } from "./live.ts";
-import { AnalysisCard, ExecutionCard, Pipeline, ReviewCard } from "./components/Session.tsx";
+import { AnalysisCard, ExecutionCard, Pipeline, ReviewCard, SessionTokensCard } from "./components/Session.tsx";
+import { TokensView } from "./components/Tokens.tsx";
 import { Brand, Sidebar } from "./components/Sidebar.tsx";
 import { SystemChips } from "./components/SystemChips.tsx";
 import { SystemView } from "./components/System.tsx";
 import { TerminalCard, type TerminalHandle } from "./components/Terminal.tsx";
 import { Code, cx } from "./components/ui.tsx";
 
-type View = "session" | "system";
+type View = "session" | "system" | "tokens";
 
 /** Mismo criterio que defaultStep() del servidor: el paso actual o el último con salida. */
 const followStep = (r: RunState | null) => r ? r.exec.current ?? r.exec.logs.at(-1) ?? r.exec.steps[0]?.n ?? null : null;
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
-  return { project: p.get("project") ?? "", run: p.get("run") ?? "", view: (p.get("view") === "system" ? "system" : "session") as View };
+  return { project: p.get("project") ?? "", run: p.get("run") ?? "", view: (["system", "tokens"].includes(p.get("view") ?? "") ? p.get("view") : "session") as View };
 }
 
 export function App() {
@@ -46,7 +47,7 @@ export function App() {
     const p = new URLSearchParams();
     if (sel.project) p.set("project", sel.project);
     if (sel.run) p.set("run", sel.run);
-    if (view === "system") p.set("view", "system");
+    if (view !== "session") p.set("view", view);
     history.replaceState(null, "", `?${p}`);
   }, [sel.project, sel.run, view]);
 
@@ -70,13 +71,17 @@ export function App() {
       <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
         <header className="sticky top-0 z-10 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-panel/95 px-4 py-2.5 backdrop-blur">
           <div className="min-w-0 flex-1">
-            <div className="truncate font-semibold">{view === "system" ? "Sistema" : run?.plan.title || run?.name || "AI Studio"}</div>
+            <div className="truncate font-semibold">
+              {view === "system" ? "Sistema" : view === "tokens" ? "Tokens" : run?.plan.title || run?.name || "AI Studio"}
+            </div>
             <div className="truncate text-xs text-muted">
-              {view === "system" ? "CPU, GPU y memoria del Mac en tiempo real" : current ? `${current.name} · ${sel.run}` : "Sin proyecto"}
+              {view === "system" ? "CPU, GPU y memoria del Mac en tiempo real"
+                : view === "tokens" ? "Lo que genera el ejecutor, petición a petición"
+                : current ? `${current.name} · ${sel.run}` : "Sin proyecto"}
             </div>
           </div>
           <div className="flex rounded-lg border border-line bg-panel-2 p-0.5 text-xs" role="tablist" aria-label="Vista">
-            {([["session", "Sesión"], ["system", "Sistema"]] as const).map(([v, label]) => (
+            {([["session", "Sesión"], ["tokens", "Tokens"], ["system", "Sistema"]] as const).map(([v, label]) => (
               <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}
                 className={cx("rounded-md px-3 py-1", view === v ? "bg-panel font-semibold text-fg shadow-sm" : "text-muted hover:text-fg")}>
                 {label}
@@ -101,6 +106,7 @@ export function App() {
 
         <main className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 p-4">
           {view === "system" && <SystemView metrics={live.metrics} history={live.history} system={live.system} />}
+          {view === "tokens" && <TokensView tokens={live.tokens} />}
           {/* Oculta (no desmontada): la terminal conserva lo recibido al volver de "Sistema" */}
           <div className={cx("flex flex-col gap-4", view !== "session" && "hidden")}>
           {live.error && <p className="rounded-lg border border-fail bg-fail-bg px-3 py-2 text-sm text-fail">{live.error}</p>}
@@ -116,6 +122,7 @@ export function App() {
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
                 <div className="flex min-w-0 flex-col gap-4">
                   <AnalysisCard run={run} />
+                  <SessionTokensCard run={run} />
                   <ReviewCard run={run} />
                 </div>
                 <div className="flex min-w-0 flex-col gap-4">

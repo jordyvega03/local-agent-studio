@@ -33,10 +33,13 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 - [ ] `ai plan --interactive`: abrir Claude Code en modo plan para discutir antes de
       escribir el plan.
 - [ ] Notificación de macOS al terminar `ai exec` (`osascript -e 'display notification …'`).
-- [ ] Métricas: tokens/s por paso (el tiempo por paso ya está en el panel).
 - [ ] Autocompletado zsh para `ai` (comandos y proyectos de `PROJECTS_ROOT`).
 
 ## Hecho
+
+- [x] 2026-10-14 — **AI Studio, Fase 2**: medidor de tokens entre Aider y Ollama (por
+      petición, paso y sesión), tokens de Opus en plan y revisión, pestaña Tokens con
+      medidor en vivo y comparación por modelo y sesión. Completa "Métricas" (tokens/s).
 
 - [x] 2026-10-14 — **AI Studio, Fase 1**: pestaña Sistema con CPU, GPU, memoria y swap en
       tiempo real, núcleos, procesos del agente, contenedores, modelo y avisos.

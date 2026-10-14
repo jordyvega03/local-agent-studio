@@ -128,7 +128,7 @@ ai studio stop          # lo detiene (ai down también)
 ai studio --rebuild     # recompila la UI y reinicia el servidor
 ```
 
-La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Dos pestañas:
+La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Tres pestañas:
 
 - **Sesión** (Fase 0): lo mismo que `ai dashboard` (sesiones en la barra lateral, etapas,
   lecturas de Opus, pasos, revisión) con datos por WebSocket y la salida de Aider en una
@@ -139,7 +139,20 @@ La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Dos pes
   memoria libre baja de `STUDIO_ALERT_MEM_FREE`, si el swap pasa del 80 %, si un contenedor
   roza su límite o si el modelo no cabe entero en GPU. Cada gráfica tiene "ver tabla".
 
-Próximas fases: tokens, comandos desde la web y agentes con roles.
+- **Tokens** (Fase 2): medidor en vivo (tokens generados, tok/s y tiempo hasta el primer
+  token mientras el modelo responde), velocidad y tamaño de cada petición, y tablas por
+  modelo, por sesión y de las últimas peticiones. En **Sesión** cada paso muestra sus
+  tokens y hay un resumen con los del ejecutor y los de Opus (plan + revisión).
+
+Próximas fases: comandos desde la web y agentes con roles.
+
+### Medidor de tokens
+
+`ai up` arranca un proxy mínimo (`lib/aiwatch.py meter`, `127.0.0.1:11435`) entre Aider y
+Ollama. Reenvía todo tal cual y, al terminar cada respuesta, registra tokens de prompt y de
+salida, tiempos, tokens/s y tiempo hasta el primer token en `logs/tokens.jsonl` y en
+`mi-app/.ai/logs/<plan>.tokens.jsonl` (con el paso al que pertenece). Se desactiva con
+`TOKEN_METER=0` en `config.env`; entonces Aider habla directamente con Ollama.
 
 - Necesita **Node >= 22.18** (`STUDIO_MIN_NODE`). La primera vez hace `npm ci` (versiones
   fijadas en `studio/package-lock.json`) y compila la UI.
@@ -160,7 +173,7 @@ ai down --all    # además cierra Docker Desktop (libera también su VM)
 |---|---|
 | `ai up [--no-warm]` | Arranca todo. `--no-warm` no precarga el modelo |
 | `ai down [--all]` | Libera memoria. `--all` cierra Docker Desktop |
-| `ai status` | Estado de Ollama/Docker, modelos en RAM, % de memoria libre |
+| `ai status` | Estado de Ollama/Docker/medidor, modelos en RAM, % de memoria libre |
 | `ai plan <proy> "tarea"` | Opus genera el plan |
 | `ai exec <proy> [plan] [-i] [--from N]` | El modelo local ejecuta |
 | `ai review <proy>` | Opus revisa el diff |

@@ -88,10 +88,24 @@ git -C ~/Documents/mi-app log --all --oneline --author='Your Name'  # commits af
 Se leen con `ioreg`, `vm_stat` y `sysctl` (sin sudo). Si sale "—", prueba a mano:
 `ioreg -r -c IOAccelerator -d 1 | grep "Device Utilization"` y `sysctl kern.memorystatus_level`.
 
+### Aider no conecta con el modelo después de activar el medidor
+```bash
+ai status                                  # ¿"medidor: 127.0.0.1:11435"?
+curl -s http://127.0.0.1:11435/api/version # debe responder como Ollama
+cat ~/Documents/agents/logs/meter.log
+```
+Si el medidor no arranca, `bin/ai` hace que Aider vaya directo a Ollama. Para desactivarlo
+del todo: `TOKEN_METER=0` en `config.env`.
+
+### La pestaña Tokens está vacía
+Solo aparecen peticiones hechas con el medidor activo (`ai up` lo arranca). Las ejecuciones
+anteriores no tienen datos de tokens.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama
 ai dashboard mi-app                 # todo en el navegador
 cat mi-app/.ai/logs/<plan>.jsonl    # eventos del plan
+tail ~/Documents/agents/logs/tokens.jsonl   # peticiones medidas (tokens, tok/s)
 cat mi-app/.aider.chat.history.md   # conversación de Aider
 ```

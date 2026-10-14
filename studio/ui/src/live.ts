@@ -1,6 +1,6 @@
 // Cliente del canal en vivo (/ws): reconexión automática y suscripción al plan elegido.
 import { useEffect, useRef, useState } from "react";
-import type { MetricSample, MetricsNow, Project, RunState, ServerMessage, SystemState } from "../../shared/types.ts";
+import type { MetricSample, MetricsNow, Project, RunState, ServerMessage, SystemState, TokensState } from "../../shared/types.ts";
 
 export type LogHandler = (step: number, reset: boolean, bytes: Uint8Array) => void;
 
@@ -12,6 +12,7 @@ export interface LiveState {
   error: string | null;
   metrics: MetricsNow | null;
   history: MetricSample[];       // histórico de métricas (ventana del servidor)
+  tokens: TokensState | null;
 }
 
 interface Selection { project: string; run: string; step: number | null }
@@ -25,7 +26,7 @@ function decode(b64: string): Uint8Array {
 
 export function useLive(sel: Selection, onLog: LogHandler) {
   const [state, setState] = useState<LiveState>({
-    connected: false, projects: null, system: null, run: null, error: null, metrics: null, history: [],
+    connected: false, projects: null, system: null, run: null, error: null, metrics: null, history: [], tokens: null,
   });
   const ws = useRef<WebSocket | null>(null);
   const selRef = useRef(sel);
@@ -61,6 +62,7 @@ export function useLive(sel: Selection, onLog: LogHandler) {
         else if (m.type === "run") setState((st) => ({ ...st, run: m.data }));
         else if (m.type === "error") setState((st) => ({ ...st, error: m.message }));
         else if (m.type === "metrics_history") setState((st) => ({ ...st, history: m.data }));
+        else if (m.type === "tokens") setState((st) => ({ ...st, tokens: m.data }));
         else if (m.type === "metrics") {
           setState((st) => {
             const cutoff = m.data.sample.t - m.data.windowMin * 60_000;

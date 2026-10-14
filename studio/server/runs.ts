@@ -3,7 +3,7 @@
 // runs.test.ts fijan el comportamiento.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { PlanStep, Project, RunState, RunSummary, Status } from "../shared/types.ts";
+import type { OpusUsage, PlanStep, Project, RunState, RunSummary, Status, TokenStats } from "../shared/types.ts";
 
 export const RUN_NAME = /^[A-Za-z0-9._-]+$/;
 const STEP_RE = /^### Paso (\d+)\s*[:.\-—]?\s*(.*)$/;
@@ -51,6 +51,21 @@ export function parsePlan(text: string): { title: string; text: string; steps: P
   return plan;
 }
 
+/** Igual que token_stats() en lib/aiwatch.py. */
+export function tokenStats(records: Event[]): TokenStats {
+  const st = { requests: 0, prompt: 0, output: 0, eval_ms: 0, total_ms: 0 };
+  for (const r of records) {
+    st.requests++;
+    st.prompt += Number(r.prompt_tokens) || 0;
+    st.output += Number(r.output_tokens) || 0;
+    st.eval_ms += Number(r.eval_ms) || 0;
+    st.total_ms += Number(r.total_ms) || 0;
+  }
+  return { ...st, tok_s: st.eval_ms ? Math.round((10 * st.output) / (st.eval_ms / 1000)) / 10 : null };
+}
+
+const OPUS_FIELDS = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost_usd"] as const;
+
 const str = (v: unknown) => (v == null ? undefined : String(v));
 const num = (v: unknown) => (typeof v === "number" ? v : v == null ? undefined : Number(v));
 
@@ -63,6 +78,10 @@ export function runState(pdir: string, name: string): RunState {
   const analysis: RunState["analysis"] = { status: planText != null ? "done" : "pending", tools: [], notes: [] };
   const exec: RunState["exec"] = { status: "pending", steps: planSteps, current: null, logs: [] };
   const review: RunState["review"] = { status: "pending" };
+  const opus: OpusUsage = {};
+  const addOpus = (ev: Event) => {
+    for (const k of OPUS_FIELDS) if (ev[k] != null) opus[k] = (opus[k] ?? 0) + Number(ev[k]);
+  };
   const steps = new Map(exec.steps.map((s) => [s.n, s]));
   const step = (n: number) => {
     let s = steps.get(n);
@@ -84,6 +103,7 @@ export function runState(pdir: string, name: string): RunState {
         break;
       case "plan_done":
         Object.assign(analysis, { status: "done", finished: ts, turns: num(ev.turns), duration_ms: num(ev.duration_ms) });
+        addOpus(ev);
         break;
       case "plan_failed":
       case "plan_aborted":
@@ -124,7 +144,7 @@ export function runState(pdir: string, name: string): RunState {
         for (const s of exec.steps) if (s.status === "running") s.status = "aborted";
         break;
       case "review_started": Object.assign(review, { status: "running", started: ts }); break;
-      case "review_done": Object.assign(review, { status: "done", finished: ts }); break;
+      case "review_done": Object.assign(review, { status: "done", finished: ts }); addOpus(ev); break;
       case "review_failed": Object.assign(review, { status: "failed", finished: ts }); break;
     }
   }
@@ -137,7 +157,15 @@ export function runState(pdir: string, name: string): RunState {
   const reviewText = readText(join(logsDir(pdir), name + ".review.md"));
   if (reviewText != null) review.text = reviewText;
 
-  return { name, plan, analysis, exec, review, events: events.length, updated: runMtime(pdir, name) };
+  // Tokens del ejecutor (medidor) por paso y en total; los de Opus vienen de los eventos.
+  const tok = readEvents(join(logsDir(pdir), name + ".tokens.jsonl"));
+  for (const s of exec.steps) {
+    const mine = tok.filter((r) => r.step === s.n);
+    if (mine.length) s.tokens = tokenStats(mine);
+  }
+  const tokens = { executor: tok.length ? tokenStats(tok) : null, opus: Object.keys(opus).length ? opus : null };
+
+  return { name, plan, analysis, exec, review, tokens, events: events.length, updated: runMtime(pdir, name) };
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -164,7 +192,8 @@ export function runSummary(pdir: string, name: string): RunSummary {
 export function listRuns(pdir: string): RunSummary[] {
   const names = new Set<string>();
   for (const f of listDir(plansDir(pdir))) if (f.endsWith(".md")) names.add(f.slice(0, -3));
-  for (const f of listDir(logsDir(pdir))) if (f.endsWith(".jsonl")) names.add(f.slice(0, -6));
+  // <plan>.tokens.jsonl es del medidor, no un plan.
+  for (const f of listDir(logsDir(pdir))) if (f.endsWith(".jsonl") && !f.endsWith(".tokens.jsonl")) names.add(f.slice(0, -6));
   return [...names].filter((n) => RUN_NAME.test(n)).map((n) => runSummary(pdir, n))
     .sort((a, b) => b.updated - a.updated);
 }

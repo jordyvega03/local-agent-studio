@@ -136,6 +136,29 @@ navegador (React) ◄──WebSocket /ws──► studio/server (Fastify, Node) 
   oscuro. Una sola escala por gráfica; tabla alternativa en cada una.
 - `ai dashboard` sigue existiendo como panel ligero sin dependencias.
 
+## Medidor de tokens (Fase 2)
+
+```
+Aider (contenedor) ──host.docker.internal:11435──► aiwatch.py meter ──► Ollama 127.0.0.1:11434
+                                                        │
+                       run/meter-context.json ─────────►├──► logs/tokens.jsonl (todo)
+                       (bin/ai: proyecto, plan, paso)   ├──► proyecto/.ai/logs/<plan>.tokens.jsonl
+                                                        └──► run/meter-live.json (en vivo, cada 0,3 s)
+```
+
+- `bin/ai` pasa a `docker/compose.yml` el puerto del medidor como `OLLAMA_PORT` cuando
+  está activo (`executor_ollama_port`), así que el compose no cambia.
+- El proxy reenvía cualquier petición en streaming (HTTP/1.0, el cuerpo termina al cerrar).
+  En `POST /api/chat` y `/api/generate` cuenta los fragmentos (≈ tokens) para el estado en
+  vivo y, con el último (`done: true`), registra `prompt_eval_count`, `eval_count` y las
+  duraciones de Ollama. `eval_count` incluye los tokens de razonamiento de gpt-oss.
+- Antes de cada paso `ai exec` escribe el contexto (`meter_context`); `ai chat`,
+  `ai exec -i` y `ai architect` también, con su `agent`. Al salir se borra.
+- Tokens de Opus: `plan_done` y `review_done` llevan `usage` del JSON de Claude Code
+  (`input_tokens`, `output_tokens`, caché y coste equivalente de API).
+- `run_state()` (Python) y `runState()` (TypeScript) suman los tokens por paso y por
+  sesión; un test de `studio/server/runs.test.ts` compara ambas salidas.
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |
@@ -144,6 +167,7 @@ navegador (React) ◄──WebSocket /ws──► studio/server (Fastify, Node) 
 | `.ai/logs/<plan>.jsonl` | Eventos del plan para el panel | No (`.ai/logs/.gitignore` lo ignora todo) |
 | `.ai/logs/<plan>.step-NNN.log` | Terminal grabada de cada paso de Aider | No |
 | `.ai/logs/<plan>.review.md` | Salida de `ai review` | No |
+| `.ai/logs/<plan>.tokens.jsonl` | Peticiones del medidor de ese plan | No |
 | `.aider.chat.history.md`, `.aider.input.history`, `.aider.tags.cache.*` | Estado de Aider | No (Aider los añade a `.gitignore`) |
 
 ## Puntos de extensión

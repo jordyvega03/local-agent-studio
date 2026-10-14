@@ -11,6 +11,7 @@ import { Metrics } from "./metrics.ts";
 import { listProjects, registeredProjects, RUN_NAME, runState } from "./runs.ts";
 import { createToken, installSecurity } from "./security.ts";
 import { systemState } from "./system.ts";
+import { readTokens } from "./tokens.ts";
 
 const cfg = loadConfig();
 const token = createToken(cfg);
@@ -34,6 +35,7 @@ app.get("/api/run", async (req, reply) => {
 });
 
 app.get("/api/metrics", async () => metrics.snapshot());
+app.get("/api/tokens", async () => readTokens(cfg));
 app.get("/ws", { websocket: true }, (socket) => handleSocket(socket, cfg, metrics));
 
 if (existsSync(cfg.uiDist)) {

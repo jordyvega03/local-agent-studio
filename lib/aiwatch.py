@@ -10,6 +10,17 @@ Solo usa la librería estándar de Python 3 (la de macOS sirve). La invoca bin/a
       Lee `claude -p --output-format stream-json --verbose` por stdin, muestra en la
       terminal qué archivos lee Opus, registra cada herramienta y guarda el plan final.
 
+  aiwatch.py review-out <log.jsonl> <salida.md>
+      Lee `claude -p --output-format json` de `ai review`: imprime la revisión, la guarda
+      y registra review_done con los tokens usados.
+
+  aiwatch.py context <archivo.json> [clave=valor ...]
+      Escribe (o borra, sin pares) el contexto actual del medidor: proyecto, plan, paso.
+
+  aiwatch.py meter <ai_home> <puerto> <url_ollama>
+      Medidor de tokens: proxy en 127.0.0.1:<puerto> hacia Ollama que registra cada
+      respuesta en logs/tokens.jsonl (y en proyecto/.ai/logs/<plan>.tokens.jsonl).
+
   aiwatch.py serve <ai_home> <puerto>
       Panel web de solo lectura en 127.0.0.1:<puerto> (ver docs/ARCHITECTURE.md).
 
@@ -20,6 +31,7 @@ step_failed, exec_done, exec_failed, exec_aborted, review_started, review_done,
 review_failed.
 """
 import glob
+import http.client
 import json
 import os
 import re
@@ -39,7 +51,8 @@ def now_iso():
 
 
 def append_event(path, etype, **fields):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
     rec = {"ts": now_iso(), "type": etype}
     rec.update(fields)
     with open(path, "a", encoding="utf-8") as f:
@@ -85,6 +98,61 @@ def tool_target(name, inp, cwd):
     return json.dumps(inp, ensure_ascii=False)[:120]
 
 
+def usage_fields(msg):
+    """Tokens de un `result` de Claude Code (stream-json o json)."""
+    u = msg.get("usage") or {}
+    out = {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
+           "cache_read_tokens": u.get("cache_read_input_tokens"),
+           "cache_creation_tokens": u.get("cache_creation_input_tokens")}
+    if msg.get("total_cost_usd") is not None:
+        out["cost_usd"] = round(msg["total_cost_usd"], 4)   # coste equivalente de API (informativo)
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def cmd_review_out(args):
+    log, out = args[0], args[1]
+    raw = sys.stdin.read()
+    try:
+        msg = json.loads(raw)
+    except ValueError:
+        say(raw.strip() or "la revisión no devolvió nada")
+        append_event(log, "review_failed", error=raw.strip()[:500])
+        return 1
+    text = (msg.get("result") or "").strip()
+    if msg.get("is_error") or not text:
+        append_event(log, "review_failed", error=str(msg.get("result") or msg.get("subtype"))[:500])
+        say(f"{RED}✗{OFF} {msg.get('result') or 'la revisión falló'}")
+        return 1
+    print(text)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(text + "\n")
+    append_event(log, "review_done", duration_ms=msg.get("duration_ms"), **usage_fields(msg))
+    return 0
+
+
+def cmd_context(args):
+    path = args[0]
+    if len(args) == 1:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return 0
+    data = {}
+    for kv in args[1:]:
+        key, _, value = kv.partition("=")
+        data[key] = coerce(value) if value else None
+    write_json_atomic(path, data)
+    return 0
+
+
+def write_json_atomic(path, data):
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
 def cmd_plan_stream(args):
     log, plan = args[0], args[1]
     cwd = os.getcwd()
@@ -112,7 +180,7 @@ def cmd_plan_stream(args):
                         say(f"  {DIM}💬 {text}{OFF}")
                         append_event(log, "plan_note", text=text)
         elif mtype == "result":
-            meta = {"turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
+            meta = {"turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms"), **usage_fields(msg)}
             if msg.get("is_error") or msg.get("subtype") != "success":
                 error = msg.get("result") or msg.get("subtype")
             else:
@@ -127,6 +195,210 @@ def cmd_plan_stream(args):
     append_event(log, "plan_failed", error=error, **meta)
     say(f"{RED}✗{OFF} {error}")
     return 1
+
+
+# --- Medidor de tokens (proxy hacia Ollama) -----------------------------------
+# Aider (en el contenedor) habla con este proxy en vez de con Ollama. Cada respuesta de
+# /api/chat o /api/generate se reenvía tal cual, en streaming, y al terminar se registra:
+# tokens de prompt y de salida, duraciones, tokens/s y tiempo hasta el primer token.
+# A qué proyecto/plan/paso pertenece lo dice run/meter-context.json (lo escribe bin/ai).
+HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+               "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
+METERED = ("/api/chat", "/api/generate")
+TOKENS_LOG_MAX = 10 * 1024 * 1024
+
+
+class Meter:
+    def __init__(self, ai_home, port, upstream):
+        self.port = port
+        self.upstream = urlparse(upstream)
+        self.ctx_file = os.path.join(ai_home, "run", "meter-context.json")
+        self.live_file = os.path.join(ai_home, "run", "meter-live.json")
+        self.log = os.path.join(ai_home, "logs", "tokens.jsonl")
+        self.lock = threading.Lock()
+        # Ollama rechaza Host ajenos (DNS rebinding); como el proxy reescribe Host, lo comprueba él.
+        self.hosts = {f"{h}:{port}" for h in ("127.0.0.1", "localhost", "host.docker.internal")}
+
+    def context(self):
+        try:
+            with open(self.ctx_file, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def live(self, data):
+        try:
+            write_json_atomic(self.live_file, data)
+        except OSError:
+            pass
+
+    def record(self, rec):
+        line = json.dumps(rec, ensure_ascii=False) + "\n"
+        with self.lock:
+            try:
+                if os.path.exists(self.log) and os.path.getsize(self.log) > TOKENS_LOG_MAX:
+                    os.replace(self.log, self.log + ".1")
+                with open(self.log, "a", encoding="utf-8") as f:
+                    f.write(line)
+            except OSError:
+                pass
+            proj, run = rec.get("project"), rec.get("run")
+            if proj and run and RUN_NAME.match(str(run)) and os.path.isdir(os.path.join(proj, ".ai", "logs")):
+                try:
+                    with open(os.path.join(proj, ".ai", "logs", f"{run}.tokens.jsonl"), "a", encoding="utf-8") as f:
+                        f.write(line)
+                except OSError:
+                    pass
+
+
+class Tracker:
+    """Cuenta los fragmentos de una respuesta en streaming y registra el resumen final."""
+
+    def __init__(self, meter, model, endpoint, t0):
+        self.meter, self.model, self.endpoint = meter, model, endpoint
+        self.ctx = meter.context()
+        self.t0 = t0            # cuando se envió la petición: el TTFT incluye la espera de Ollama
+        self.first = None
+        self.tokens = 0
+        self.buf = b""
+        self.final = None
+        self.last_live = 0.0
+        self.meter.live(self.live_state())
+
+    def live_state(self, active=True):
+        now = time.time()
+        gen = now - self.first if self.first else 0
+        return {"active": active, "model": self.model, "endpoint": self.endpoint, "context": self.ctx,
+                "started": int(self.t0 * 1000), "tokens": self.tokens,
+                "tok_s": round(self.tokens / gen, 1) if gen > 0.5 else None,
+                "ttft_ms": int((self.first - self.t0) * 1000) if self.first else None,
+                "updated": int(now * 1000)}
+
+    def feed(self, chunk):
+        self.buf += chunk
+        *lines, self.buf = self.buf.split(b"\n")
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if obj.get("done"):
+                self.final = obj
+                continue
+            msg = obj.get("message") or {}
+            if msg.get("content") or msg.get("thinking") or obj.get("response") or obj.get("thinking"):
+                self.tokens += 1
+                if self.first is None:
+                    self.first = time.time()
+        if time.time() - self.last_live > 0.3:
+            self.last_live = time.time()
+            self.meter.live(self.live_state())
+
+    def finish(self, status="ok"):
+        if self.buf.strip():
+            self.feed(b"\n")
+        f = self.final or {}
+        ms = lambda k: round(f[k] / 1e6) if f.get(k) is not None else None
+        out_tokens = f.get("eval_count", self.tokens)
+        eval_ms = ms("eval_duration")
+        prompt_ms = ms("prompt_eval_duration")
+        rec = {
+            "ts": now_iso(), "status": status if self.final or status != "ok" else "incomplete",
+            "model": f.get("model", self.model), "endpoint": self.endpoint,
+            "prompt_tokens": f.get("prompt_eval_count"), "cached_prompt_tokens": f.get("prompt_eval_cached_count"),
+            "output_tokens": out_tokens, "load_ms": ms("load_duration"), "prompt_ms": prompt_ms,
+            "eval_ms": eval_ms, "total_ms": ms("total_duration") or int((time.time() - self.t0) * 1000),
+            "ttft_ms": int((self.first - self.t0) * 1000) if self.first else None,
+            "tok_s": round(out_tokens / (eval_ms / 1000), 1) if eval_ms and out_tokens else None,
+            "prompt_tok_s": round(f["prompt_eval_count"] / (prompt_ms / 1000), 1)
+            if prompt_ms and f.get("prompt_eval_count") else None,
+            "done_reason": f.get("done_reason"),
+            "project": self.ctx.get("project"), "run": self.ctx.get("run"),
+            "step": self.ctx.get("step"), "agent": self.ctx.get("agent"),
+        }
+        rec = {k: v for k, v in rec.items() if v is not None}
+        self.meter.record(rec)
+        live = self.live_state(active=False)
+        live["last"] = rec
+        self.meter.live(live)
+
+
+def make_meter_handler(meter):
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "ai-meter"
+
+        def log_message(self, fmt, *args):
+            pass
+
+        def do_GET(self): self.proxy()
+        def do_POST(self): self.proxy()
+        def do_DELETE(self): self.proxy()
+        def do_HEAD(self): self.proxy()
+
+        def proxy(self):
+            if self.headers.get("Host", "") not in meter.hosts:
+                self.send_error(403, "Host no permitido")
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else None
+            headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS}
+            up = meter.upstream
+            headers["Host"] = up.netloc   # Origin se reenvía: Ollama sigue aplicando su control
+            conn = http.client.HTTPConnection(up.hostname, up.port or 80, timeout=900)
+            tracker = None
+            t0 = time.time()
+            try:
+                conn.request(self.command, self.path, body, headers)
+                resp = conn.getresponse()
+                self.send_response(resp.status)
+                for k, v in resp.getheaders():
+                    if k.lower() not in HOP_HEADERS:
+                        self.send_header(k, v)
+                self.send_header("Connection", "close")   # HTTP/1.0: el cuerpo termina al cerrar
+                self.end_headers()
+                if self.command == "POST" and self.path in METERED and resp.status == 200:
+                    model = ""
+                    try:
+                        model = json.loads(body or b"{}").get("model", "")
+                    except ValueError:
+                        pass
+                    tracker = Tracker(meter, model, self.path, t0)
+                while True:
+                    chunk = resp.read1(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    if tracker:
+                        tracker.feed(chunk)
+                if tracker:
+                    tracker.finish()
+            except (BrokenPipeError, ConnectionResetError):
+                if tracker:
+                    tracker.finish("cancelled")   # el cliente cortó (Ctrl+C, timeout)
+            except OSError as exc:
+                if tracker:
+                    tracker.finish("error")
+                else:
+                    try:
+                        self.send_error(502, f"Ollama no responde: {exc}")
+                    except OSError:
+                        pass
+            finally:
+                conn.close()
+
+    return Handler
+
+
+def cmd_meter(args):
+    ai_home, port, upstream = args[0], int(args[1]), args[2]
+    meter = Meter(ai_home, port, upstream)
+    meter.live({"active": False, "updated": int(time.time() * 1000)})
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_meter_handler(meter))
+    server.daemon_threads = True
+    sys.stderr.write(f"{now_iso()} medidor en 127.0.0.1:{port} -> {upstream}\n")
+    server.serve_forever()
 
 
 # --- Lectura de planes y registros -------------------------------------------
@@ -171,6 +443,21 @@ def parse_plan(path):
     return plan
 
 
+def token_stats(records):
+    """Suma de peticiones del medidor: tokens de prompt/salida, tiempos y tokens/s medios."""
+    st = {"requests": 0, "prompt": 0, "output": 0, "eval_ms": 0, "total_ms": 0}
+    for r in records:
+        st["requests"] += 1
+        for key, field in (("prompt", "prompt_tokens"), ("output", "output_tokens"),
+                           ("eval_ms", "eval_ms"), ("total_ms", "total_ms")):
+            st[key] += r.get(field) or 0
+    st["tok_s"] = round(st["output"] / (st["eval_ms"] / 1000), 1) if st["eval_ms"] else None
+    return st
+
+
+OPUS_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost_usd")
+
+
 def run_state(pdir, name):
     plans = os.path.join(pdir, ".ai", "plans")
     logs = os.path.join(pdir, ".ai", "logs")
@@ -182,6 +469,7 @@ def run_state(pdir, name):
     analysis = {"status": "done" if has_plan else "pending", "tools": [], "notes": []}
     execu = {"status": "pending", "steps": plan.pop("steps")}
     review = {"status": "pending"}
+    opus = {}
     steps = {s["n"]: s for s in execu["steps"]}
 
     def step(n):
@@ -200,6 +488,9 @@ def run_state(pdir, name):
             analysis["notes"].append({"ts": ts, "text": ev.get("text")})
         elif t == "plan_done":
             analysis.update(status="done", finished=ts, turns=ev.get("turns"), duration_ms=ev.get("duration_ms"))
+            for k in OPUS_FIELDS:
+                if ev.get(k) is not None:
+                    opus[k] = opus.get(k, 0) + ev[k]
         elif t in ("plan_failed", "plan_aborted"):
             analysis.update(status="failed", finished=ts, error=ev.get("error") or "interrumpido")
         elif t == "exec_started":
@@ -234,6 +525,9 @@ def run_state(pdir, name):
             review.update(status="running", started=ts)
         elif t == "review_done":
             review.update(status="done", finished=ts)
+            for k in OPUS_FIELDS:
+                if ev.get(k) is not None:
+                    opus[k] = opus.get(k, 0) + ev[k]
         elif t == "review_failed":
             review.update(status="failed", finished=ts)
 
@@ -247,8 +541,15 @@ def run_state(pdir, name):
             review["text"] = f.read()
     except OSError:
         pass
+    # Tokens del ejecutor (medidor) por paso y en total; los de Opus vienen de los eventos.
+    tok = read_events(os.path.join(logs, name + ".tokens.jsonl"))
+    for s in execu["steps"]:
+        mine = [r for r in tok if r.get("step") == s["n"]]
+        if mine:
+            s["tokens"] = token_stats(mine)
+    tokens = {"executor": token_stats(tok) if tok else None, "opus": opus or None}
     return {"name": name, "plan": plan, "analysis": analysis, "exec": execu, "review": review,
-            "events": len(events), "updated": run_mtime(pdir, name)}
+            "tokens": tokens, "events": len(events), "updated": run_mtime(pdir, name)}
 
 
 def run_mtime(pdir, name):
@@ -273,7 +574,8 @@ def list_runs(pdir):
     for p in glob.glob(os.path.join(pdir, ".ai", "plans", "*.md")):
         names.add(os.path.basename(p)[:-3])
     for p in glob.glob(os.path.join(pdir, ".ai", "logs", "*.jsonl")):
-        names.add(os.path.basename(p)[:-6])
+        if not p.endswith(".tokens.jsonl"):        # registro del medidor, no un plan
+            names.add(os.path.basename(p)[:-6])
     runs = [run_summary(pdir, n) for n in names if RUN_NAME.match(n)]
     return sorted(runs, key=lambda r: r["updated"], reverse=True)
 
@@ -487,7 +789,8 @@ def cmd_serve(args):
 
 
 def main(argv):
-    commands = {"event": (cmd_event, 2), "plan-stream": (cmd_plan_stream, 2), "serve": (cmd_serve, 2)}
+    commands = {"event": (cmd_event, 2), "plan-stream": (cmd_plan_stream, 2), "review-out": (cmd_review_out, 2),
+                "context": (cmd_context, 1), "meter": (cmd_meter, 3), "serve": (cmd_serve, 2)}
     if len(argv) < 1 or argv[0] not in commands or len(argv) - 1 < commands[argv[0]][1]:
         sys.stderr.write(__doc__)
         return 2

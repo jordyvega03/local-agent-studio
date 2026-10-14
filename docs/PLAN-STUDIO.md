@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **Fases 0 y 1 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **Fases 0, 1 y 2 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -60,8 +60,9 @@ la Fase 0 usa componentes propios con Tailwind en el mismo estilo.
 - Modelo: cuál está cargado, % GPU, tamaño, cuándo se descarga.
 - Gráficas de 15 min por WebSocket (1 s). Aviso si la RAM libre baja del 15 %.
 
-### Fase 2 — Tokens y sesiones (2–3 días)
-- **Medidor de tokens:** proxy mínimo Aider → `127.0.0.1:11435` → Ollama. Registra
+### Fase 2 — Tokens y sesiones (2–3 días) ✅ 2026-10-14
+- **Medidor de tokens** (hecho en Python, `lib/aiwatch.py meter`, para que `bin/ai` no dependa
+  de Node; `docker/compose.yml` no cambió: `bin/ai` le pasa el puerto del medidor): proxy mínimo Aider → `127.0.0.1:11435` → Ollama. Registra
   `prompt_eval_count`, `eval_count` y duraciones de cada respuesta: tokens enviados,
   recibidos y tokens/s por petición, y la respuesta token a token en vivo.
   Solo cambia `OLLAMA_API_BASE` en `docker/compose.yml` (documentar en `SECURITY.md`).

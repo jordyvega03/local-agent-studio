@@ -21,6 +21,7 @@
   --color-term: var(--term);
   --color-series-1: var(--series-1);
   --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -33,6 +34,7 @@
   --term: #0f1419;
   /* Series de gráficas: validadas (dataviz/validate_palette.js) contra --panel en cada modo */
   --series-1: #2a78d6; --series-2: #eb6834;
+  --series-3: #1baf7a;   /* < 3:1 en claro: va siempre con leyenda y tabla (regla de alivio) */
   --grid: #e6e9ed;
 }
 @media (prefers-color-scheme: dark) {
@@ -43,7 +45,7 @@
     --ok: #3fb950; --ok-bg: #11251a; --run: #d29922; --run-bg: #2a2010;
     --fail: #f85149; --fail-bg: #2c1416; --idle: #6e7681; --idle-bg: #1f252e;
     --term: #05080c;
-    --series-1: #3987e5; --series-2: #d95926;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
     --grid: #1f2630;
   }
 }

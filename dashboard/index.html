@@ -292,6 +292,7 @@ function renderExec(d) {
     el("div", {},
       el("div", { class: "ttl" }, `${s.n}. ${s.title || "Paso " + s.n}`),
       s.files && s.files.length ? el("div", { class: "files" }, s.files.join("  ")) : null,
+      s.tokens ? el("div", { class: "files" }, `${s.tokens.output} tokens de salida · ${s.tokens.tok_s ?? "—"} tok/s`) : null,
       s.commits && s.commits.length ? el("div", { class: "commits" }, s.commits.map((c) => el("div", {}, "● " + c))) : null),
     el("span", { class: "dur" }, stepDuration(s)))));
   return el("section", { class: "card" },

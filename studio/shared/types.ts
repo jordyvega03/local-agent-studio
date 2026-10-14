@@ -4,6 +4,25 @@
 
 export type Status = "pending" | "running" | "done" | "failed" | "aborted";
 
+/** Suma de peticiones del medidor (misma forma que token_stats() en lib/aiwatch.py). */
+export interface TokenStats {
+  requests: number;
+  prompt: number;
+  output: number;
+  eval_ms: number;
+  total_ms: number;
+  tok_s: number | null;
+}
+
+/** Tokens de Opus (ai plan + ai review), del JSON de Claude Code. */
+export interface OpusUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  cost_usd?: number;            // coste equivalente de API, informativo
+}
+
 export interface PlanStep {
   n: number;
   title: string;
@@ -12,6 +31,7 @@ export interface PlanStep {
   started?: string;
   secs?: number;
   commits?: string[];
+  tokens?: TokenStats;
 }
 
 export interface ToolCall { ts: string; tool: string; target: string }
@@ -51,6 +71,7 @@ export interface RunState {
   analysis: Analysis;
   exec: Execution;
   review: Review;
+  tokens: { executor: TokenStats | null; opus: OpusUsage | null };
   events: number;
   updated: number;         // epoch en segundos
 }
@@ -110,6 +131,49 @@ export interface MetricsNow {
   alertMemFree: number;      // umbral de aviso (STUDIO_ALERT_MEM_FREE)
 }
 
+// --- Medidor de tokens (Fase 2) --------------------------------------------------
+/** Una petición registrada por el medidor (logs/tokens.jsonl). */
+export interface TokenRecord {
+  ts: string;
+  status: "ok" | "cancelled" | "error" | "incomplete";
+  model: string;
+  endpoint: string;
+  prompt_tokens?: number;
+  cached_prompt_tokens?: number;
+  output_tokens?: number;
+  load_ms?: number;
+  prompt_ms?: number;
+  eval_ms?: number;
+  total_ms?: number;
+  ttft_ms?: number;
+  tok_s?: number;
+  prompt_tok_s?: number;
+  done_reason?: string;
+  project?: string;
+  run?: string;
+  step?: number;
+  agent?: string;
+}
+
+/** Estado en vivo del medidor (run/meter-live.json). */
+export interface MeterLive {
+  active: boolean;
+  model?: string;
+  context?: { project?: string; run?: string; step?: number; agent?: string };
+  started?: number;
+  tokens?: number;
+  tok_s?: number | null;
+  ttft_ms?: number | null;
+  updated: number;
+  last?: TokenRecord;
+}
+
+export interface TokensState {
+  enabled: boolean;             // TOKEN_METER=1 y el medidor está en marcha
+  live: MeterLive | null;
+  recent: TokenRecord[];        // últimas peticiones (las más nuevas al final)
+}
+
 // --- Protocolo WebSocket (/ws) -------------------------------------------------
 export type ClientMessage =
   | { type: "subscribe"; project: string; run: string; step: number | null };
@@ -120,6 +184,7 @@ export type ServerMessage =
   | { type: "run"; data: RunState | null }
   | { type: "metrics_history"; data: MetricSample[] }   // al conectar
   | { type: "metrics"; data: MetricsNow }               // cada segundo
+  | { type: "tokens"; data: TokensState }               // si cambia (1 s)
   // Bytes crudos de la terminal grabada (base64). reset=true: empezar de cero.
   | { type: "log"; step: number; reset: boolean; chunk: string }
   | { type: "error"; message: string };

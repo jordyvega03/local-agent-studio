@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -100,5 +101,46 @@ describe("listRuns", () => {
     writeFileSync(join(dir, ".ai/plans", "mal nombre.md"), "# x");
     const runs = listRuns(dir).map((r) => r.name).sort();
     expect(runs).toEqual([name, "otro"].sort());
+  });
+});
+
+describe("tokens", () => {
+  const rec = (step: number, out: number, evalMs: number) =>
+    JSON.stringify({ ts: "x", status: "ok", model: "m", prompt_tokens: 100, output_tokens: out, eval_ms: evalMs, total_ms: evalMs + 50, step });
+
+  it("suma los tokens del medidor por paso y en total, y los de Opus de los eventos", () => {
+    write([ev("plan_done", { input_tokens: 10, output_tokens: 500, cost_usd: 0.1 }), ev("review_done", { output_tokens: 200 })]);
+    writeFileSync(join(dir, ".ai/logs", name + ".tokens.jsonl"), [rec(1, 100, 4000), rec(1, 50, 1000), rec(2, 30, 1000)].join("\n") + "\n");
+    const st = runState(dir, name);
+    expect(st.exec.steps[0].tokens).toEqual({ requests: 2, prompt: 200, output: 150, eval_ms: 5000, total_ms: 5100, tok_s: 30 });
+    expect(st.tokens.executor).toMatchObject({ requests: 3, output: 180 });
+    expect(st.tokens.opus).toEqual({ input_tokens: 10, output_tokens: 700, cost_usd: 0.1 });
+  });
+
+  it("el registro del medidor no aparece como otro plan", () => {
+    writeFileSync(join(dir, ".ai/logs", name + ".tokens.jsonl"), rec(1, 1, 1) + "\n");
+    expect(listRuns(dir).map((r) => r.name)).toEqual([name]);
+  });
+});
+
+describe("paridad con lib/aiwatch.py (panel ligero)", () => {
+  it("run_state de Python y runState de TypeScript coinciden", () => {
+    write([
+      ev("plan_started", { task: "t", model: "opus" }), ev("plan_tool", { tool: "Read", target: "a" }),
+      ev("plan_done", { turns: 2, duration_ms: 10, output_tokens: 9 }),
+      ev("exec_started", { model: "gpt-oss:20b", total: 2, from: 1 }), ev("step_started", { n: 1 }),
+      ev("step_done", { n: 1, secs: 3, commits: "abc x" }), ev("step_started", { n: 2 }), ev("step_failed", { n: 2 }),
+      ev("exec_failed"),
+    ]);
+    writeFileSync(join(dir, ".ai/logs", name + ".tokens.jsonl"),
+      JSON.stringify({ ts: "x", status: "ok", model: "m", prompt_tokens: 5, output_tokens: 7, eval_ms: 700, total_ms: 800, step: 1 }) + "\n");
+    const py = JSON.parse(execFileSync("python3", ["-c",
+      "import sys, json; sys.path.insert(0, sys.argv[1]); import aiwatch; print(json.dumps(aiwatch.run_state(sys.argv[2], sys.argv[3])))",
+      join(import.meta.dirname, "../../lib"), dir, name], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } }));
+    const ts = JSON.parse(JSON.stringify(runState(dir, name)));
+    for (const k of ["analysis", "exec", "review", "tokens", "events"]) {
+      const strip = (o: Record<string, unknown>) => JSON.parse(JSON.stringify(o, (key, v) => (v === null ? undefined : v)));
+      expect(strip(ts[k] ?? {}), k).toEqual(strip(py[k] ?? {}));
+    }
   });
 });
