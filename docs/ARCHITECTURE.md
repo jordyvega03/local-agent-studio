@@ -122,6 +122,18 @@ navegador (React) ◄──WebSocket /ws──► studio/server (Fastify, Node) 
   servidor empuja `run` (si cambió, cada 1 s), `log` (bytes nuevos de la terminal grabada
   en base64, cada 1 s), `projects` (5 s) y `system` (3 s). La terminal se pinta con
   xterm.js, que interpreta los colores y redibujados de Aider tal cual.
+- **Métricas (`server/metrics.ts`, Fase 1):** un único recolector para todos los clientes,
+  cada `STUDIO_METRICS_INTERVAL_MS`. CPU con `os.cpus()`; memoria con `vm_stat` (activa +
+  wired + comprimida, como el Monitor de Actividad); presión con `sysctl
+  kern.memorystatus_level` (el mismo "free percentage" de `memory_pressure`); swap con
+  `sysctl vm.swapusage`; GPU con `ioreg` (`IOAccelerator`); procesos con `ps` cada 2
+  lecturas; contenedores con `docker stats` cada 3. Nada necesita sudo. Guarda
+  `STUDIO_METRICS_WINDOW_MIN` minutos en memoria; el cliente recibe el histórico al
+  conectar (`metrics_history`) y luego cada muestra (`metrics`). Coste medido: ~3 % de un
+  núcleo y ~130 MB para todo el servidor.
+- **Gráficas:** Recharts. Colores de series en `ui/src/index.css` (`--series-1/2`),
+  validados con el validador de la guía dataviz contra el fondo de los paneles en claro y
+  oscuro. Una sola escala por gráfica; tabla alternativa en cada una.
 - `ai dashboard` sigue existiendo como panel ligero sin dependencias.
 
 ## Archivos que se generan en cada proyecto

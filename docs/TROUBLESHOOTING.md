@@ -74,6 +74,20 @@ ai studio --rebuild          # recompila la UI y reinicia el servidor
 ```
 Si el puerto está ocupado, cambia `STUDIO_PORT` en `config.env`.
 
+### Mis commits salen como "Your Name <you@example.com>"
+Una versión anterior del agente dejó que Aider escribiera esa identidad en el `.git/config`
+del proyecto (corregido el 2026-10-14, ver `SECURITY.md`). Compruébalo y límpialo:
+```bash
+git -C ~/Documents/mi-app config --local --get-regexp '^user\.'   # ¿aparece "Your Name"?
+git -C ~/Documents/mi-app config --local --unset user.name        # solo si es "Your Name"
+git -C ~/Documents/mi-app config --local --unset user.email       # solo si es you@example.com
+git -C ~/Documents/mi-app log --all --oneline --author='Your Name'  # commits afectados
+```
+
+### La pestaña Sistema no muestra GPU o memoria
+Se leen con `ioreg`, `vm_stat` y `sysctl` (sin sudo). Si sale "—", prueba a mano:
+`ioreg -r -c IOAccelerator -d 1 | grep "Device Utilization"` y `sysctl kern.memorystatus_level`.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama

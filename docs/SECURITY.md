@@ -47,6 +47,16 @@
 6. **Las imágenes de terceros son un riesgo de cadena de suministro.** La imagen de Aider
    está fijada a una versión (`AIDER_IMAGE`) para que no cambie sola. Actualízala a mano.
 
+## Identidad de git dentro del contenedor
+
+Aider lee la identidad de git de los archivos de configuración y, si no la encuentra,
+**escribe `user.name = Your Name` y `user.email = you@example.com` en el `.git/config`
+del proyecto** (no en el contenedor). Tus commits manuales en ese repo saldrían con esa
+identidad. Desde 2026-10-14 el `entrypoint` de `docker/compose.yml` crea un
+`~/.gitconfig` efímero (en el tmpfs `/tmp`) con `GIT_AUTHOR_NAME/EMAIL` antes de arrancar
+Aider. No añade montajes, capacidades ni privilegios: el endurecimiento no cambia. Para
+revisar un proyecto antiguo, ver `TROUBLESHOOTING.md`.
+
 ## Buenas prácticas
 
 - Haz push de tu rama principal antes de `ai exec`.

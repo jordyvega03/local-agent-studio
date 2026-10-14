@@ -7,6 +7,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { loadConfig } from "./config.ts";
 import { handleSocket } from "./live.ts";
+import { Metrics } from "./metrics.ts";
 import { listProjects, registeredProjects, RUN_NAME, runState } from "./runs.ts";
 import { createToken, installSecurity } from "./security.ts";
 import { systemState } from "./system.ts";
@@ -14,6 +15,8 @@ import { systemState } from "./system.ts";
 const cfg = loadConfig();
 const token = createToken(cfg);
 const app = Fastify({ logger: { level: "warn" } });
+const metrics = new Metrics(cfg);
+metrics.start();
 
 await app.register(fastifyCookie);
 await app.register(fastifyWebsocket, { options: { maxPayload: 64 * 1024 } });
@@ -30,7 +33,8 @@ app.get("/api/run", async (req, reply) => {
   return runState(project, run);
 });
 
-app.get("/ws", { websocket: true }, (socket) => handleSocket(socket, cfg));
+app.get("/api/metrics", async () => metrics.snapshot());
+app.get("/ws", { websocket: true }, (socket) => handleSocket(socket, cfg, metrics));
 
 if (existsSync(cfg.uiDist)) {
   await app.register(fastifyStatic, { root: cfg.uiDist, wildcard: false });

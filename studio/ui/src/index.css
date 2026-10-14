@@ -19,6 +19,8 @@
   --color-idle: var(--idle);
   --color-idle-bg: var(--idle-bg);
   --color-term: var(--term);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -29,6 +31,9 @@
   --ok: #1a7f37; --ok-bg: #dcf5e3; --run: #9a6700; --run-bg: #fff2cc;
   --fail: #cf222e; --fail-bg: #ffe6e4; --idle: #8c959f; --idle-bg: #e8ebef;
   --term: #0f1419;
+  /* Series de gráficas: validadas (dataviz/validate_palette.js) contra --panel en cada modo */
+  --series-1: #2a78d6; --series-2: #eb6834;
+  --grid: #e6e9ed;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -38,6 +43,8 @@
     --ok: #3fb950; --ok-bg: #11251a; --run: #d29922; --run-bg: #2a2010;
     --fail: #f85149; --fail-bg: #2c1416; --idle: #6e7681; --idle-bg: #1f252e;
     --term: #05080c;
+    --series-1: #3987e5; --series-2: #d95926;
+    --grid: #1f2630;
   }
 }
 

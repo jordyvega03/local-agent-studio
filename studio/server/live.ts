@@ -1,12 +1,14 @@
 // Canal en vivo (/ws). El cliente se suscribe a un proyecto + plan (+ paso) y el servidor
 // empuja solo lo que cambia: estado del plan (1 s), bytes nuevos de la terminal grabada
-// (1 s), proyectos (5 s) y sistema (3 s).
+// (1 s), proyectos (5 s) y sistema (3 s). Las métricas (metrics.ts) llegan con su propio
+// ritmo (STUDIO_METRICS_INTERVAL_MS) a todos los clientes.
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import type { WebSocket } from "ws";
 import type { Config } from "./config.ts";
+import type { Metrics } from "./metrics.ts";
 import { listProjects, registeredProjects, RUN_NAME, runState, stepLogPath } from "./runs.ts";
 import { systemState } from "./system.ts";
-import type { ClientMessage, RunState, ServerMessage } from "../shared/types.ts";
+import type { ClientMessage, MetricsNow, RunState, ServerMessage } from "../shared/types.ts";
 
 const TAIL_BYTES = 256 * 1024;     // al abrir un paso se manda como mucho esto
 const CHUNK_BYTES = 512 * 1024;    // tope por envío
@@ -58,7 +60,7 @@ function parseMessage(raw: string): ClientMessage | null {
   }
 }
 
-export function handleSocket(socket: WebSocket, cfg: Config) {
+export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
   let sub: Sub | null = null;
   let cursor: LogCursor | null = null;
   const last = { run: "", projects: "", system: "" };
@@ -114,7 +116,12 @@ export function handleSocket(socket: WebSocket, cfg: Config) {
     setInterval(tickProjects, 5000),
     setInterval(() => void tickSystem(), 3000),
   ];
-  socket.on("close", () => timers.forEach(clearInterval));
+  // Métricas: el histórico al conectar y luego cada muestra del recolector compartido.
+  const onSample = (data: MetricsNow) => send({ type: "metrics", data });
+  metrics.on("sample", onSample);
+  send({ type: "metrics_history", data: metrics.snapshot() });
+
+  socket.on("close", () => { timers.forEach(clearInterval); metrics.off("sample", onSample); });
   tickProjects();
   void tickSystem();
 }

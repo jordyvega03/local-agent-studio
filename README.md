@@ -128,11 +128,18 @@ ai studio stop          # lo detiene (ai down también)
 ai studio --rebuild     # recompila la UI y reinicia el servidor
 ```
 
-La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). **Fase 0 hecha:**
-lo mismo que `ai dashboard` (sesiones en la barra lateral, etapas, lecturas de Opus, pasos,
-revisión, sistema) con datos empujados por WebSocket y la salida de Aider en una terminal
-real (xterm.js, con colores). Próximas fases: métricas, tokens, comandos desde la web y
-agentes con roles.
+La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Dos pestañas:
+
+- **Sesión** (Fase 0): lo mismo que `ai dashboard` (sesiones en la barra lateral, etapas,
+  lecturas de Opus, pasos, revisión) con datos por WebSocket y la salida de Aider en una
+  terminal real (xterm.js, con colores).
+- **Sistema** (Fase 1): CPU, GPU, memoria y swap del Mac en tiempo real (1 muestra/s, 15 min
+  de histórico, rangos 1/5/15 min), uso por núcleo, procesos del agente (Ollama, Docker,
+  Claude Code), contenedores de Aider frente a su límite y el modelo cargado. Avisa si la
+  memoria libre baja de `STUDIO_ALERT_MEM_FREE`, si el swap pasa del 80 %, si un contenedor
+  roza su límite o si el modelo no cabe entero en GPU. Cada gráfica tiene "ver tabla".
+
+Próximas fases: tokens, comandos desde la web y agentes con roles.
 
 - Necesita **Node >= 22.18** (`STUDIO_MIN_NODE`). La primera vez hace `npm ci` (versiones
   fijadas en `studio/package-lock.json`) y compila la UI.

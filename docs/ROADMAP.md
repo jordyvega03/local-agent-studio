@@ -38,6 +38,11 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-14 — **AI Studio, Fase 1**: pestaña Sistema con CPU, GPU, memoria y swap en
+      tiempo real, núcleos, procesos del agente, contenedores, modelo y avisos.
+- [x] 2026-10-14 — **Arreglo:** Aider ya no escribe "Your Name" en el `.git/config` del
+      proyecto (identidad de git efímera en el contenedor).
+
 - [x] 2026-10-14 — **AI Studio, Fase 0** (`ai studio`): servidor Fastify + UI React con
       token por sesión, Host/Origin, WebSocket en vivo y terminal xterm.js; misma
       información que `ai dashboard`. Ver `PLAN-STUDIO.md` para las fases siguientes.

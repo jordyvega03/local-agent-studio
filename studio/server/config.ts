@@ -9,8 +9,17 @@ export interface Config {
   plannerModel: string;
   ollamaUrl: string;
   composeProject: string;
+  metricsIntervalMs: number;
+  metricsWindowMin: number;
+  alertMemFree: number;  // % de memoria libre que dispara el aviso en la UI
   tokenFile: string;     // donde se deja el token de esta ejecución (lo lee bin/ai)
   uiDist: string;        // build de la UI (vite build)
+}
+
+function positive(name: string): number {
+  const n = Number(required(name));
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`${name} no válido: ${process.env[name]}`);
+  return n;
 }
 
 function required(name: string): string {
@@ -30,6 +39,9 @@ export function loadConfig(): Config {
     plannerModel: required("PLANNER_MODEL"),
     ollamaUrl: required("OLLAMA_URL"),
     composeProject: required("COMPOSE_PROJECT"),
+    metricsIntervalMs: Math.max(250, positive("STUDIO_METRICS_INTERVAL_MS")),
+    metricsWindowMin: positive("STUDIO_METRICS_WINDOW_MIN"),
+    alertMemFree: positive("STUDIO_ALERT_MEM_FREE"),
     tokenFile: join(aiHome, "run", "studio.token"),
     uiDist: join(aiHome, "studio", "ui", "dist"),
   };

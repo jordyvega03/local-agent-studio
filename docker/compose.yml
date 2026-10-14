@@ -27,7 +27,18 @@ x-hardened: &hardened
     GIT_AUTHOR_EMAIL: ${GIT_EMAIL}
     GIT_COMMITTER_NAME: ${GIT_NAME}
     GIT_COMMITTER_EMAIL: ${GIT_EMAIL}
-  entrypoint: ["/venv/bin/aider", "--config", "/config/aider.conf.yml"]
+  # Aider lee la identidad de git de los archivos de config (no de GIT_AUTHOR_*) y, si no
+  # la encuentra, escribe "Your Name" en el .git/config DEL PROYECTO. Se la damos en un
+  # ~/.gitconfig efímero (HOME vive en el tmpfs) antes de arrancar. $$ = $ para el shell.
+  entrypoint:
+    - /bin/sh
+    - -c
+    - >-
+      mkdir -p "$$HOME" &&
+      git config --global user.name "$$GIT_AUTHOR_NAME" &&
+      git config --global user.email "$$GIT_AUTHOR_EMAIL" &&
+      exec /venv/bin/aider --config /config/aider.conf.yml "$$@"
+    - aider
   stdin_open: true
   tty: true
 

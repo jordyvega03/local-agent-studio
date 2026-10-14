@@ -27,3 +27,15 @@ export const clock = (iso?: string) =>
   iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
+
+/** Bytes en GB binarios, como los muestra macOS (24 GB = 24 × 1024³). */
+export function bytes(n: number | null | undefined, digits = 1): string {
+  if (n == null) return "—";
+  const gib = n / 1024 ** 3;
+  return gib >= 1 ? `${gib.toFixed(digits)} GB` : `${Math.round(n / 1024 ** 2)} MB`;
+}
+
+export const pct = (n: number | null | undefined) => (n == null ? "—" : `${Math.round(n)}%`);
+
+export const hhmm = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+export const hhmmss = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });

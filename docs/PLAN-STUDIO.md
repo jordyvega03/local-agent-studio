@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **Fase 0 hecha** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **Fases 0 y 1 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -53,7 +53,7 @@ la Fase 0 usa componentes propios con Tailwind en el mismo estilo.
 - Portar a React lo que hace `ai dashboard`: etapas, pasos, salida, revisión.
 - **Validación:** muestra lo mismo que `ai dashboard` con un plan real.
 
-### Fase 1 — Métricas en tiempo real (1–2 días)
+### Fase 1 — Métricas en tiempo real (1–2 días) ✅ 2026-10-14
 - Mac: CPU total y por núcleo, RAM usada/libre/presión, swap, GPU %.
 - Procesos: CPU/RAM de Ollama y de la VM de Docker.
 - Contenedores: CPU/RAM de cada Aider frente a `EXECUTOR_MEM_LIMIT`.

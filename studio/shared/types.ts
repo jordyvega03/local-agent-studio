@@ -77,6 +77,39 @@ export interface SystemState {
   mem_free: number | null;
 }
 
+// --- Métricas en tiempo real (Fase 1) ------------------------------------------
+/** Una muestra por segundo; el servidor guarda los últimos METRICS_WINDOW_MIN minutos. */
+export interface MetricSample {
+  t: number;                 // epoch ms
+  cpu: number;               // % de toda la CPU (0-100)
+  gpu: number | null;        // % de uso de la GPU (ioreg), null si no se pudo leer
+  memUsed: number;           // bytes en uso (activa + wired + comprimida), como Monitor de Actividad
+  memFreePct: number | null; // "free percentage" de macOS (memory_pressure)
+  swapUsed: number;          // bytes
+}
+
+export interface ProcGroup {
+  name: string;              // Ollama, Docker (VM), Claude Code, AI Studio
+  cpu: number;               // % de un núcleo, como Monitor de Actividad (puede pasar de 100)
+  rss: number;               // bytes
+  count: number;             // procesos agrupados
+}
+
+export interface ContainerStat { name: string; cpu: number; mem: number; limit: number }
+
+/** Lo que no se guarda en el histórico: estado actual detallado. */
+export interface MetricsNow {
+  sample: MetricSample;
+  cores: number[];           // % por núcleo
+  memTotal: number;
+  swapTotal: number;
+  gpuMem: number | null;     // memoria del sistema en uso por la GPU (bytes)
+  procs: ProcGroup[];
+  containers: ContainerStat[];
+  windowMin: number;
+  alertMemFree: number;      // umbral de aviso (STUDIO_ALERT_MEM_FREE)
+}
+
 // --- Protocolo WebSocket (/ws) -------------------------------------------------
 export type ClientMessage =
   | { type: "subscribe"; project: string; run: string; step: number | null };
@@ -85,6 +118,8 @@ export type ServerMessage =
   | { type: "projects"; data: Project[] }
   | { type: "system"; data: SystemState }
   | { type: "run"; data: RunState | null }
+  | { type: "metrics_history"; data: MetricSample[] }   // al conectar
+  | { type: "metrics"; data: MetricsNow }               // cada segundo
   // Bytes crudos de la terminal grabada (base64). reset=true: empezar de cero.
   | { type: "log"; step: number; reset: boolean; chunk: string }
   | { type: "error"; message: string };
