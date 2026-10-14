@@ -159,6 +159,31 @@ Aider (contenedor) ──host.docker.internal:11435──► aiwatch.py meter �
 - `run_state()` (Python) y `runState()` (TypeScript) suman los tokens por paso y por
   sesión; un test de `studio/server/runs.test.ts` compara ambas salidas.
 
+## Acciones desde la web (Fase 3)
+
+```
+navegador ──POST /api/jobs {action, project, …}──► actions.ts (lista cerrada + validación)
+    ▲                                                   │ argv fijo de bin/ai
+    │ WebSocket: jobs, job_output ◄──┐                  ▼
+    └── job_input / job_resize ──────┴──► jobs.ts: cola (de uno en uno) → node-pty → bin/ai …
+                                                        └──► logs/studio-audit.jsonl
+```
+
+- **`actions.ts`** traduce cada acción (`plan`, `exec`, `review`, `chat`, `use`, `up`) a
+  argumentos fijos de `bin/ai`. Proyectos: dentro de `PROJECTS_ROOT` (con `realpath`, así
+  un enlace simbólico no escapa), nunca la raíz ni carpetas sensibles. Plan: solo nombres
+  sin ruta que existan. Tarea: hasta 4000 caracteres, sin caracteres de control. Modelo:
+  solo los ya descargados. `down` no existe a propósito (apagaría el Studio).
+- **`jobs.ts`** ejecuta `bin/ai` con node-pty (terminal real: colores, `read -p`, Ctrl+C)
+  sin shell: el argv llega tal cual. Guarda `STUDIO_JOB_BUFFER_KB` de salida por trabajo
+  para quien se conecta a mitad y recuerda `STUDIO_JOB_HISTORY` trabajos. Cancelar = Ctrl+C
+  (bin/ai registra `exec_aborted`), luego SIGTERM a los 8 s y SIGKILL a los 15 s.
+- npm 11 no ejecuta los scripts de instalación de node-pty, que dejan `spawn-helper` sin
+  permiso de ejecución; el servidor se lo da al arrancar (`ensurePtyHelper`), sin ejecutar
+  código de instalación de terceros.
+- **Editor de planes:** CodeMirror 6 (cargado bajo demanda). `PUT /api/plan` escribe de forma
+  atómica y responde 409 si el archivo cambió desde que lo abriste (`mtime`).
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |

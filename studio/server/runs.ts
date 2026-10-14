@@ -1,7 +1,7 @@
 // Lectura de planes y registros de proyecto/.ai/. Misma semántica que run_state() de
 // lib/aiwatch.py (el panel ligero): si cambias una, cambia la otra. Los tests de
 // runs.test.ts fijan el comportamiento.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { OpusUsage, PlanStep, Project, RunState, RunSummary, Status, TokenStats } from "../shared/types.ts";
 
@@ -165,7 +165,10 @@ export function runState(pdir: string, name: string): RunState {
   }
   const tokens = { executor: tok.length ? tokenStats(tok) : null, opus: Object.keys(opus).length ? opus : null };
 
-  return { name, plan, analysis, exec, review, tokens, events: events.length, updated: runMtime(pdir, name) };
+  let mtime: number | undefined;
+  try { mtime = statSync(planPath).mtimeMs; } catch { /* sin plan */ }
+
+  return { name, plan: { ...plan, mtime }, analysis, exec, review, tokens, events: events.length, updated: runMtime(pdir, name) };
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -215,4 +218,17 @@ export function listProjects(aiHome: string): Project[] {
 
 export function stepLogPath(pdir: string, name: string, step: number): string {
   return join(logsDir(pdir), `${name}.step-${String(step).padStart(3, "0")}.log`);
+}
+
+export const MAX_PLAN_BYTES = 256 * 1024;
+
+/** Guarda un plan editado en la web. Falla si alguien lo cambió desde que lo abriste. */
+export function savePlan(pdir: string, name: string, text: string, expectedMtime: number): { mtime: number } {
+  const path = join(plansDir(pdir), name + ".md");
+  const current = statSync(path).mtimeMs;           // lanza si no existe: solo se editan planes existentes
+  if (Math.abs(current - expectedMtime) > 1) throw Object.assign(new Error("El plan cambió desde que lo abriste."), { conflict: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text.endsWith("\n") ? text : text + "\n");
+  renameSync(tmp, path);
+  return { mtime: statSync(path).mtimeMs };
 }

@@ -101,11 +101,20 @@ del todo: `TOKEN_METER=0` en `config.env`.
 Solo aparecen peticiones hechas con el medidor activo (`ai up` lo arranca). Las ejecuciones
 anteriores no tienen datos de tokens.
 
+### AI Studio: "posix_spawnp failed" al lanzar una acción
+node-pty necesita que `spawn-helper` sea ejecutable; el servidor lo arregla al arrancar.
+Si persiste: `chmod +x ~/Documents/agents/studio/node_modules/node-pty/prebuilds/*/spawn-helper`
+y `ai studio --rebuild`.
+
+### AI Studio: "El proyecto debe estar dentro de …"
+Las acciones solo se lanzan sobre carpetas dentro de `PROJECTS_ROOT` (`config.env`).
+
 ### Ver logs
 ```bash
 ai logs            # Ollama
 ai dashboard mi-app                 # todo en el navegador
 cat mi-app/.ai/logs/<plan>.jsonl    # eventos del plan
 tail ~/Documents/agents/logs/tokens.jsonl   # peticiones medidas (tokens, tok/s)
+tail ~/Documents/agents/logs/studio-audit.jsonl   # acciones lanzadas desde el Studio
 cat mi-app/.aider.chat.history.md   # conversación de Aider
 ```

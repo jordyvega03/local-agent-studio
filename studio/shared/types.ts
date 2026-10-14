@@ -67,7 +67,7 @@ export interface Review { status: Status; text?: string; started?: string; finis
 
 export interface RunState {
   name: string;
-  plan: { title: string; text: string };
+  plan: { title: string; text: string; mtime?: number };   // mtime: para editar sin pisar cambios
   analysis: Analysis;
   exec: Execution;
   review: Review;
@@ -174,9 +174,43 @@ export interface TokensState {
   recent: TokenRecord[];        // últimas peticiones (las más nuevas al final)
 }
 
+// --- Trabajos lanzados desde la web (Fase 3) ------------------------------------
+export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up";
+
+/** Lo que envía la web para lanzar una acción (lo valida server/actions.ts). */
+export interface JobRequest {
+  action: JobAction;
+  project?: string;        // ruta absoluta o relativa a PROJECTS_ROOT
+  task?: string;           // plan
+  plan?: string;           // exec: nombre del plan (sin .md)
+  from?: number;           // exec: reanudar desde el paso N
+  interactive?: boolean;   // exec -i
+  model?: string;          // use
+}
+
+export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+
+export interface JobSummary {
+  id: string;
+  action: JobAction;
+  label: string;
+  project?: string;
+  argv: string[];
+  interactive: boolean;
+  status: JobStatus;
+  created: number;         // epoch ms
+  started?: number;
+  finished?: number;
+  exitCode?: number;
+  cancelling?: boolean;
+}
+
 // --- Protocolo WebSocket (/ws) -------------------------------------------------
 export type ClientMessage =
-  | { type: "subscribe"; project: string; run: string; step: number | null };
+  | { type: "subscribe"; project: string; run: string; step: number | null }
+  | { type: "job_attach"; id: string | null }          // ver la terminal de un trabajo (null: ninguno)
+  | { type: "job_input"; id: string; data: string }    // teclas hacia la terminal del trabajo
+  | { type: "job_resize"; id: string; cols: number; rows: number };
 
 export type ServerMessage =
   | { type: "projects"; data: Project[] }
@@ -185,6 +219,9 @@ export type ServerMessage =
   | { type: "metrics_history"; data: MetricSample[] }   // al conectar
   | { type: "metrics"; data: MetricsNow }               // cada segundo
   | { type: "tokens"; data: TokensState }               // si cambia (1 s)
+  | { type: "jobs"; data: JobSummary[] }                // cola de trabajos, al cambiar
+  // Salida de la terminal de un trabajo (base64). reset=true: es la repetición inicial.
+  | { type: "job_output"; id: string; reset: boolean; chunk: string }
   // Bytes crudos de la terminal grabada (base64). reset=true: empezar de cero.
   | { type: "log"; step: number; reset: boolean; chunk: string }
   | { type: "error"; message: string };

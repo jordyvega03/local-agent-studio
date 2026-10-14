@@ -128,7 +128,7 @@ ai studio stop          # lo detiene (ai down también)
 ai studio --rebuild     # recompila la UI y reinicia el servidor
 ```
 
-La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Tres pestañas:
+La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Cuatro pestañas:
 
 - **Sesión** (Fase 0): lo mismo que `ai dashboard` (sesiones en la barra lateral, etapas,
   lecturas de Opus, pasos, revisión) con datos por WebSocket y la salida de Aider en una
@@ -144,7 +144,17 @@ La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Tres pe
   modelo, por sesión y de las últimas peticiones. En **Sesión** cada paso muestra sus
   tokens y hay un resumen con los del ejecutor y los de Opus (plan + revisión).
 
-Próximas fases: comandos desde la web y agentes con roles.
+- **Acciones** (Fase 3): lanza `plan`, `exec` (desde el paso N o en modo chat), `review`,
+  `chat`, cambiar de modelo o `ai up` desde la web. Cada trabajo es `bin/ai` en una
+  terminal real que ves en el navegador: puedes responder a "¿Continuar? [s/N]", escribir
+  en el chat de Aider o pulsar Ctrl+C. Van en cola de uno en uno y se pueden cancelar. En
+  **Sesión** hay atajos (Ejecutar plan, Reanudar desde el paso que falló, Chat con el plan,
+  Revisar) y el plan se puede **editar** antes de ejecutarlo.
+
+Lo lanzado desde la web queda registrado igual que desde la terminal. Si paras el Studio
+(`ai studio stop`, `--rebuild` o `ai down`) con un trabajo en marcha, recibe Ctrl+C.
+
+Próxima fase: agentes con roles (coder, tester, reviewer) y flujos.
 
 ### Medidor de tokens
 

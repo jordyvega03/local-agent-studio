@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **Fases 0, 1 y 2 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **Fases 0 a 3 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -41,8 +41,8 @@ queda como panel ligero de respaldo.
 | PTY | `node-pty` | `ai exec` se comporta igual que en una terminal |
 | Métricas | `systeminformation`, `docker stats`, `ioreg` (GPU sin sudo), `ollama /api/ps` | Sin privilegios |
 
-Decidido (2026-10-14): backend Node/TS. shadcn/ui se incorporará en la Fase 3 (formularios);
-la Fase 0 usa componentes propios con Tailwind en el mismo estilo.
+Decidido (2026-10-14): backend Node/TS. Componentes propios con Tailwind en estilo shadcn
+(sin shadcn/ui: los formularios de la Fase 3 no lo necesitaron y así hay menos dependencias).
 
 ## Fases
 
@@ -70,12 +70,13 @@ la Fase 0 usa componentes propios con Tailwind en el mismo estilo.
 - **Vista Sesión:** un plan completo con tokens por paso, tiempos, tok/s y commits.
 - **Historial:** comparar sesiones y modelos en la misma tarea.
 
-### Fase 3 — Comandos desde la web (3–4 días)
+### Fase 3 — Comandos desde la web (3–4 días) ✅ 2026-10-14
 - Formularios: nuevo plan, ejecutar, reanudar desde N, revisar, cambiar modelo.
 - Cada acción lanza `bin/ai` en un PTY mostrado con xterm.js (responder prompts, Ctrl+C).
 - Chat con el ejecutor (`ai exec -i` / `ai chat`) embebido.
 - Cola de trabajos: uno a la vez (`OLLAMA_NUM_PARALLEL=1`), con cancelar.
-- Editor de planes (Monaco) para revisar antes de ejecutar.
+- Editor de planes para revisar antes de ejecutar. Hecho con **CodeMirror 6** en vez de
+  Monaco: ~10 veces más ligero, sin workers ni CDN (encaja con la CSP).
 - Lo lanzado desde la web también queda en `.ai/logs/`.
 
 ### Fase 4 — Agentes con roles (4–5 días)

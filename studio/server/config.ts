@@ -12,6 +12,9 @@ export interface Config {
   metricsIntervalMs: number;
   metricsWindowMin: number;
   alertMemFree: number;  // % de memoria libre que dispara el aviso en la UI
+  projectsRoot: string;  // PROJECTS_ROOT: solo se lanzan acciones sobre carpetas dentro de ella
+  jobHistory: number;
+  jobBufferKb: number;
   tokenFile: string;     // donde se deja el token de esta ejecución (lo lee bin/ai)
   uiDist: string;        // build de la UI (vite build)
 }
@@ -42,6 +45,9 @@ export function loadConfig(): Config {
     metricsIntervalMs: Math.max(250, positive("STUDIO_METRICS_INTERVAL_MS")),
     metricsWindowMin: positive("STUDIO_METRICS_WINDOW_MIN"),
     alertMemFree: positive("STUDIO_ALERT_MEM_FREE"),
+    projectsRoot: required("PROJECTS_ROOT"),
+    jobHistory: positive("STUDIO_JOB_HISTORY"),
+    jobBufferKb: positive("STUDIO_JOB_BUFFER_KB"),
     tokenFile: join(aiHome, "run", "studio.token"),
     uiDist: join(aiHome, "studio", "ui", "dist"),
   };

@@ -37,6 +37,10 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-14 — **AI Studio, Fase 3**: acciones desde la web (plan, exec, review, chat,
+      modelo, up) con cola, terminal interactiva (node-pty + xterm.js), cancelación,
+      atajos en Sesión, editor de planes (CodeMirror) y auditoría.
+
 - [x] 2026-10-14 — **AI Studio, Fase 2**: medidor de tokens entre Aider y Ollama (por
       petición, paso y sesión), tokens de Opus en plan y revisión, pestaña Tokens con
       medidor en vivo y comparación por modelo y sesión. Completa "Métricas" (tokens/s).

@@ -1,8 +1,9 @@
 // Cliente del canal en vivo (/ws): reconexión automática y suscripción al plan elegido.
 import { useEffect, useRef, useState } from "react";
-import type { MetricSample, MetricsNow, Project, RunState, ServerMessage, SystemState, TokensState } from "../../shared/types.ts";
+import type { JobSummary, MetricSample, MetricsNow, Project, RunState, ServerMessage, SystemState, TokensState } from "../../shared/types.ts";
 
 export type LogHandler = (step: number, reset: boolean, bytes: Uint8Array) => void;
+export type JobOutputHandler = (id: string, reset: boolean, bytes: Uint8Array) => void;
 
 export interface LiveState {
   connected: boolean;
@@ -13,6 +14,14 @@ export interface LiveState {
   metrics: MetricsNow | null;
   history: MetricSample[];       // histórico de métricas (ventana del servidor)
   tokens: TokensState | null;
+  jobs: JobSummary[];
+}
+
+/** Lo que la UI puede mandar por el canal en vivo además de suscribirse. */
+export interface LiveActions {
+  attachJob: (id: string | null) => void;
+  jobInput: (id: string, data: string) => void;
+  jobResize: (id: string, cols: number, rows: number) => void;
 }
 
 interface Selection { project: string; run: string; step: number | null }
@@ -24,15 +33,19 @@ function decode(b64: string): Uint8Array {
   return out;
 }
 
-export function useLive(sel: Selection, onLog: LogHandler) {
+export function useLive(sel: Selection, onLog: LogHandler, onJobOutput: JobOutputHandler): LiveState & LiveActions {
   const [state, setState] = useState<LiveState>({
-    connected: false, projects: null, system: null, run: null, error: null, metrics: null, history: [], tokens: null,
+    connected: false, projects: null, system: null, run: null, error: null, metrics: null, history: [], tokens: null, jobs: [],
   });
   const ws = useRef<WebSocket | null>(null);
   const selRef = useRef(sel);
   const logRef = useRef(onLog);
+  const jobOutRef = useRef(onJobOutput);
+  const attachedRef = useRef<string | null>(null);
   selRef.current = sel;
   logRef.current = onLog;
+  jobOutRef.current = onJobOutput;
+  const raw = (m: object) => { if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m)); };
 
   const subscribe = () => {
     const s = selRef.current;
@@ -53,6 +66,7 @@ export function useLive(sel: Selection, onLog: LogHandler) {
         retry = 500;
         setState((st) => ({ ...st, connected: true, error: null }));
         subscribe();
+        if (attachedRef.current) raw({ type: "job_attach", id: attachedRef.current });   // tras reconectar
       };
       sock.onmessage = (e) => {
         const m = JSON.parse(e.data) as ServerMessage;
@@ -63,6 +77,8 @@ export function useLive(sel: Selection, onLog: LogHandler) {
         else if (m.type === "error") setState((st) => ({ ...st, error: m.message }));
         else if (m.type === "metrics_history") setState((st) => ({ ...st, history: m.data }));
         else if (m.type === "tokens") setState((st) => ({ ...st, tokens: m.data }));
+        else if (m.type === "jobs") setState((st) => ({ ...st, jobs: m.data }));
+        else if (m.type === "job_output") jobOutRef.current(m.id, m.reset, decode(m.chunk));
         else if (m.type === "metrics") {
           setState((st) => {
             const cutoff = m.data.sample.t - m.data.windowMin * 60_000;
@@ -87,5 +103,10 @@ export function useLive(sel: Selection, onLog: LogHandler) {
     subscribe();
   }, [sel.project, sel.run, sel.step]);
 
-  return state;
+  return {
+    ...state,
+    attachJob: (id) => { attachedRef.current = id; raw({ type: "job_attach", id }); },
+    jobInput: (id, data) => raw({ type: "job_input", id, data }),
+    jobResize: (id, cols, rows) => raw({ type: "job_resize", id, cols, rows }),
+  };
 }

@@ -5,11 +5,12 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import type { WebSocket } from "ws";
 import type { Config } from "./config.ts";
+import type { Jobs } from "./jobs.ts";
 import type { Metrics } from "./metrics.ts";
 import { listProjects, registeredProjects, RUN_NAME, runState, stepLogPath } from "./runs.ts";
 import { systemState } from "./system.ts";
 import { readTokens } from "./tokens.ts";
-import type { ClientMessage, MetricsNow, RunState, ServerMessage } from "../shared/types.ts";
+import type { ClientMessage, JobSummary, MetricsNow, RunState, ServerMessage } from "../shared/types.ts";
 
 const TAIL_BYTES = 256 * 1024;     // al abrir un paso se manda como mucho esto
 const CHUNK_BYTES = 512 * 1024;    // tope por envío
@@ -49,19 +50,35 @@ function startOffset(path: string): number {
   return size - TAIL_BYTES + (nl >= 0 ? nl + 1 : 0);
 }
 
+const MAX_INPUT = 4096;   // teclas por mensaje hacia la terminal de un trabajo
+
 function parseMessage(raw: string): ClientMessage | null {
   try {
     const m = JSON.parse(raw);
-    if (m?.type !== "subscribe" || typeof m.project !== "string" || typeof m.run !== "string") return null;
-    const step = m.step == null ? null : Number(m.step);
-    if (step !== null && !(Number.isInteger(step) && step > 0 && step < 1000)) return null;
-    return { type: "subscribe", project: m.project, run: m.run, step };
+    switch (m?.type) {
+      case "subscribe": {
+        if (typeof m.project !== "string" || typeof m.run !== "string") return null;
+        const step = m.step == null ? null : Number(m.step);
+        if (step !== null && !(Number.isInteger(step) && step > 0 && step < 1000)) return null;
+        return { type: "subscribe", project: m.project, run: m.run, step };
+      }
+      case "job_attach":
+        return m.id === null || typeof m.id === "string" ? { type: "job_attach", id: m.id } : null;
+      case "job_input":
+        return typeof m.id === "string" && typeof m.data === "string" && m.data.length <= MAX_INPUT
+          ? { type: "job_input", id: m.id, data: m.data } : null;
+      case "job_resize":
+        return typeof m.id === "string" && Number.isInteger(m.cols) && Number.isInteger(m.rows)
+          ? { type: "job_resize", id: m.id, cols: m.cols, rows: m.rows } : null;
+      default:
+        return null;
+    }
   } catch {
     return null;
   }
 }
 
-export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
+export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics, jobs: Jobs) {
   let sub: Sub | null = null;
   let cursor: LogCursor | null = null;
   const last = { run: "", projects: "", system: "", tokens: "" };
@@ -100,9 +117,27 @@ export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
   const tickSystem = async () => sendIfChanged("system", { type: "system", data: await systemState(cfg) });
   const tickTokens = () => sendIfChanged("tokens", { type: "tokens", data: readTokens(cfg) });
 
+  // Trabajos: lista al cambiar y la terminal del trabajo que esté mirando este cliente.
+  let attached: string | null = null;
+  const onJobs = (data: JobSummary[]) => send({ type: "jobs", data });
+  const onOutput = (id: string, chunk: Buffer) => {
+    if (id === attached) send({ type: "job_output", id, reset: false, chunk: chunk.toString("base64") });
+  };
+  jobs.on("update", onJobs);
+  jobs.on("output", onOutput);
+  send({ type: "jobs", data: jobs.list() });
+
   socket.on("message", (raw) => {
     const m = parseMessage(String(raw));
     if (!m) return send({ type: "error", message: "mensaje no válido" });
+    if (m.type === "job_attach") {
+      attached = m.id;
+      const replay = m.id ? jobs.replay(m.id) : null;
+      if (m.id && replay) send({ type: "job_output", id: m.id, reset: true, chunk: replay.toString("base64") });
+      return;
+    }
+    if (m.type === "job_input") return jobs.input(m.id, m.data);
+    if (m.type === "job_resize") return jobs.resize(m.id, m.cols, m.rows);
     // Solo proyectos registrados por bin/ai y nombres de plan sin rutas.
     if (m.run && (!registeredProjects(cfg.aiHome).includes(m.project) || !RUN_NAME.test(m.run))) {
       return send({ type: "error", message: "proyecto o plan no válido" });
@@ -124,7 +159,12 @@ export function handleSocket(socket: WebSocket, cfg: Config, metrics: Metrics) {
   metrics.on("sample", onSample);
   send({ type: "metrics_history", data: metrics.snapshot() });
 
-  socket.on("close", () => { timers.forEach(clearInterval); metrics.off("sample", onSample); });
+  socket.on("close", () => {
+    timers.forEach(clearInterval);
+    metrics.off("sample", onSample);
+    jobs.off("update", onJobs);
+    jobs.off("output", onOutput);
+  });
   tickProjects();
   tickTokens();
   void tickSystem();

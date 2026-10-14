@@ -1,8 +1,10 @@
 // Vista de una sesión (un plan): etapas, análisis de Opus, pasos del ejecutor y revisión.
-import { ArrowRight, Brain, Coins, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
+import { ArrowRight, Brain, Coins, MessagesSquare, Pencil, Play, RotateCcw, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
   MessageSquare, ScanSearch, Wrench } from "lucide-react";
-import { useState, type ReactNode } from "react";
-import type { RunState, Status } from "../../../shared/types.ts";
+import { lazy, Suspense, useState, type ReactNode } from "react";
+import type { JobRequest, RunState, Status } from "../../../shared/types.ts";
+// El editor (CodeMirror) se carga solo al abrirlo: no pesa en la carga inicial.
+const PlanEditor = lazy(() => import("./PlanEditor.tsx").then((m) => ({ default: m.PlanEditor })));
 import { clock, compact, duration, secondsSince, tokS } from "../format.ts";
 import { Card, Code, cx, Empty, StatusBadge, StatusIcon } from "./ui.tsx";
 
@@ -48,9 +50,10 @@ const TOOL_ICON: Record<string, ReactNode> = {
   Read: <FileText className="size-3.5" />, Glob: <FolderSearch className="size-3.5" />, Grep: <FileSearch className="size-3.5" />,
 };
 
-export function AnalysisCard({ run }: { run: RunState }) {
+export function AnalysisCard({ run, project }: { run: RunState; project: string }) {
   const a = run.analysis;
   const [showPlan, setShowPlan] = useState(false);
+  const [editing, setEditing] = useState(false);
   const items = [
     ...a.tools.map((t) => ({ ts: t.ts, icon: TOOL_ICON[t.tool] ?? <Wrench className="size-3.5" />, label: t.tool, text: t.target, note: false })),
     ...a.notes.map((n) => ({ ts: n.ts, icon: <MessageSquare className="size-3.5" />, label: "", text: n.text, note: true })),
@@ -58,11 +61,25 @@ export function AnalysisCard({ run }: { run: RunState }) {
 
   return (
     <Card title="Análisis (Opus)" icon={<Brain className="size-4 text-muted" />} status={a.status}
-      actions={run.plan.text && (
-        <button onClick={() => setShowPlan(!showPlan)} className="text-xs text-accent hover:underline">
-          {showPlan ? "ocultar plan" : "ver plan"}
-        </button>
+      actions={run.plan.text && !editing && (
+        <div className="flex items-center gap-3">
+          <button onClick={() => setShowPlan(!showPlan)} className="text-xs text-accent hover:underline">
+            {showPlan ? "ocultar plan" : "ver plan"}
+          </button>
+          {run.plan.mtime != null && (
+            <button onClick={() => { setEditing(true); setShowPlan(false); }} className="flex items-center gap-1 text-xs text-accent hover:underline">
+              <Pencil className="size-3" />editar
+            </button>
+          )}
+        </div>
       )}>
+      {editing && run.plan.mtime != null && (
+        <div className="mb-3">
+          <Suspense fallback={<Empty>Cargando editor…</Empty>}>
+            <PlanEditor project={project} run={run.name} text={run.plan.text} mtime={run.plan.mtime} onClose={() => setEditing(false)} />
+          </Suspense>
+        </div>
+      )}
       <dl className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
         {a.task && <><dt className="text-muted">Tarea</dt><dd className="break-words">{a.task}</dd></>}
         {a.status === "running" && <><dt className="text-muted">Tiempo</dt><dd>{duration(secondsSince(a.started))}</dd></>}
@@ -182,5 +199,37 @@ export function SessionTokensCard({ run }: { run: RunState }) {
       )}
       {o?.cost_usd != null && <p className="mt-2 text-[11px] text-muted">El coste es lo que costaría por API; con tu suscripción de Claude no se cobra aparte.</p>}
     </Card>
+  );
+}
+
+/** Atajos sobre la sesión abierta: lanzan el trabajo y llevan a la pestaña Acciones. */
+export function SessionActions({ run, project, onAction }: { run: RunState; project: string; onAction: (req: JobRequest) => void }) {
+  const x = run.exec;
+  const stuck = x.steps.find((s) => s.status === "failed" || s.status === "aborted");
+  const btn = "flex items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 py-1.5 text-xs hover:border-accent hover:text-fg";
+  if (!run.plan.text) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Acciones de la sesión">
+      {x.status !== "running" && (
+        <button className={cx(btn, "border-accent font-semibold text-fg")} onClick={() => onAction({ action: "exec", project, plan: run.name })}>
+          <Play className="size-3.5" />{x.status === "pending" ? "Ejecutar plan" : "Ejecutar de nuevo"}
+        </button>
+      )}
+      {stuck && x.status !== "running" && (
+        <button className={btn} onClick={() => onAction({ action: "exec", project, plan: run.name, from: stuck.n })}>
+          <RotateCcw className="size-3.5" />Reanudar desde el paso {stuck.n}
+        </button>
+      )}
+      {x.status !== "running" && (
+        <button className={btn} onClick={() => onAction({ action: "exec", project, plan: run.name, interactive: true })}>
+          <MessagesSquare className="size-3.5" />Chat con el plan
+        </button>
+      )}
+      {x.status === "done" && run.review.status !== "running" && (
+        <button className={btn} onClick={() => onAction({ action: "review", project })}>
+          <ScanSearch className="size-3.5" />Revisar con Opus
+        </button>
+      )}
+    </div>
   );
 }
