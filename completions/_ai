@@ -1,0 +1,105 @@
+#compdef ai
+# Autocompletado de `ai` para zsh: comandos, proyectos, planes, agentes, flujos y modelos.
+# Instalación: `ai completion` (imprime las dos líneas para tu ~/.zshrc).
+
+# Raíz del repo: ai está enlazado en ~/.local/bin/ai -> <repo>/bin/ai.
+_ai_home() {
+  local bin=${commands[ai]}
+  [[ -n $bin ]] && print -r -- ${bin:A:h:h}
+}
+
+# Valor de una clave de config.env sin ejecutarlo (como agent_field en bin/ai).
+_ai_config() {
+  local home=$(_ai_home) value
+  [[ -f $home/config.env ]] || return
+  # Mismo patrón que agent_field en bin/ai: CLAVE="valor"  # comentario
+  value=$(sed -n -E "s/^$1=[\"']?([^\"']*)[\"']?[[:space:]]*(#.*)?\$/\\1/p" $home/config.env | head -1)
+  print -r -- ${value//\$HOME/$HOME}
+}
+
+# Proyectos: los registrados por ai y los repos git a 1-2 niveles de PROJECTS_ROOT,
+# como rutas relativas a PROJECTS_ROOT (lo que acepta resolve_project).
+_ai_list_projects() {
+  local home=$(_ai_home) root=$(_ai_config PROJECTS_ROOT) d
+  reply=()
+  [[ -n $root && -d $root ]] || return
+  for d in ${(f)"$(cat $home/run/projects 2>/dev/null)"} $root/*/.git(N:h) $root/*/*/.git(N:h); do
+    [[ $d == $root/* && -d $d ]] && reply+=(${d#$root/})
+  done
+  reply=(${(u)reply})
+}
+
+_ai_list_names() {  # _ai_list_names agents|flows
+  local home=$(_ai_home)
+  reply=($home/$1/*.env(N:t:r))
+}
+
+_ai_list_plans() {  # _ai_list_plans <proyecto>
+  local root=$(_ai_config PROJECTS_ROOT) dir=$1
+  [[ $dir != /* ]] && dir=$root/$dir
+  reply=($dir/.ai/plans/*.md(N:t))
+  reply=(.ai/plans/${^reply})
+}
+
+_ai_list_models() {
+  local host=$(_ai_config OLLAMA_HOST)
+  reply=(${(f)"$(OLLAMA_HOST=${host:-127.0.0.1:11434} ollama list 2>/dev/null | awk 'NR>1 {print $1}')"})
+}
+
+_ai_projects() { local reply; _ai_list_projects; _describe -t projects 'proyecto' reply; }
+
+_ai() {
+  local -a cmds reply
+  cmds=(
+    'up:Arranca Docker, Ollama, el medidor y el modelo'
+    'down:Libera la memoria (modelo, Ollama, panel, Studio)'
+    'status:Estado, modelos cargados y memoria'
+    'build:(Re)construye la imagen del ejecutor'
+    'plan:Opus analiza el proyecto y escribe un plan'
+    'exec:El modelo local ejecuta un plan paso a paso'
+    'review:Opus revisa el diff del agente'
+    'agent:Lanza un agente (coder, tester, reviewer, docs…)'
+    'flow:Ejecuta un flujo multiagente'
+    'chat:Chat libre con el modelo local'
+    'architect:Aider: Opus arquitecto + local editor'
+    'dashboard:Panel web ligero'
+    'studio:AI Studio (interfaz React)'
+    'models:Modelos descargados'
+    'use:Cambia el modelo ejecutor'
+    'pull:Descarga un modelo'
+    'rm:Borra un modelo del disco'
+    'logs:Log de Ollama en vivo'
+    'config:Abre config.env'
+    'completion:Cómo activar este autocompletado'
+    'help:Ayuda'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'comando' cmds
+    return
+  fi
+  case $words[2] in
+    plan|review|chat|architect)
+      (( CURRENT == 3 )) && _ai_projects ;;
+    dashboard)
+      (( CURRENT == 3 )) && { _ai_projects; compadd stop; } ;;
+    studio)
+      (( CURRENT == 3 )) && { _ai_projects; compadd stop --rebuild; } ;;
+    exec|run)
+      if (( CURRENT == 3 )); then _ai_projects
+      else _ai_list_plans $words[3]; compadd -a reply; compadd -- -i --from; fi ;;
+    agent|flow)
+      local kind=agents; [[ $words[2] == flow ]] && kind=flows
+      if (( CURRENT == 3 )); then _ai_list_names $kind; compadd -a reply; compadd list
+      elif (( CURRENT == 4 )); then _ai_projects
+      elif [[ $words[2] == flow ]] && (( CURRENT >= 6 )); then compadd -- --yes; fi ;;
+    use|rm)
+      (( CURRENT == 3 )) && { _ai_list_models; compadd -a reply; } ;;
+    down|stop)
+      (( CURRENT == 3 )) && compadd -- --all ;;
+    up)
+      (( CURRENT == 3 )) && compadd -- --no-warm ;;
+  esac
+}
+
+# Al cargarse como función (fpath) se llama sola; al hacer `source` del archivo no.
+[[ $funcstack[1] == _ai ]] && _ai "$@"

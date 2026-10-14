@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { SquareTerminal } from "lucide-react";
+import { THEME_EVENT, termBackground } from "../theme.ts";
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import type { Status } from "../../../shared/types.ts";
 import { Card } from "./ui.tsx";
@@ -34,11 +35,13 @@ export function TerminalCard({ ref, step, status, following }: {
     t.open(box.current!);
     fit.fit();
     const ro = new ResizeObserver(() => fit.fit());
+    const onTheme = () => { t.options.theme = { ...t.options.theme, background: termBackground() }; };
+    window.addEventListener(THEME_EVENT, onTheme);
     ro.observe(box.current!);
     term.current = t;
     for (const q of queue.current) write(t, q.reset, q.bytes);
     queue.current = [];
-    return () => { ro.disconnect(); t.dispose(); term.current = null; };
+    return () => { ro.disconnect(); window.removeEventListener(THEME_EVENT, onTheme); t.dispose(); term.current = null; };
   }, []);
 
   const write = (t: XTerm, reset: boolean, bytes: Uint8Array) => {

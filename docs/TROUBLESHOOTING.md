@@ -125,6 +125,15 @@ Está esperando tu aprobación (en el Studio verás Aprobar/Rechazar) o una preg
 etapa, p. ej. "Hay cambios sin commitear… ¿Continuar?". Respóndela en su terminal
 (Acciones en el Studio) o haz commit antes de lanzar el flujo.
 
+### No me llegan las notificaciones
+Ajustes del Sistema → Notificaciones → **Editor de Scripts**: permitir. Comprueba
+`NOTIFY=1` en `config.env`. Prueba: `osascript -e 'display notification "hola" with title "ai"'`.
+
+### El autocompletado no funciona
+Ejecuta `ai completion` y sigue sus instrucciones; con oh-my-zsh la línea `fpath=…` va
+**antes** de `source $ZSH/oh-my-zsh.sh`. Abre una terminal nueva. Si sigue sin ir:
+`rm -f ~/.zcompdump*; exec zsh`.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama

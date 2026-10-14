@@ -229,6 +229,19 @@ ai flow feature mi-app "tarea"
 - Eventos: `flow_started`, `stage_started/done/failed`, `flow_retry`, `flow_waiting`,
   `flow_approved/rejected`, `flow_done/failed/aborted` (paridad Python/TS con tests).
 
+## Extras (Fase 6)
+
+- **Notificaciones** (`notify` en `bin/ai`): `osascript` recibe título y texto como
+  argumentos (`on run argv`), nunca interpolados en el AppleScript. Se omiten dentro de un
+  flujo (`STAGE_OUT` definido) para que solo avise el flujo.
+- **Autocompletado** (`completions/_ai`): localiza el repo por el enlace de `ai`, lee
+  `config.env` con el mismo `sed` que `agent_field` (sin ejecutarlo) y lista proyectos
+  (registrados + repos git a 1-2 niveles de `PROJECTS_ROOT`), planes, agentes, flujos y
+  modelos (`ollama list`).
+- **Tema del Studio** (`ui/src/theme.ts`): `data-theme` en `<html>`; sin atributo = automático
+  (`prefers-color-scheme`). Se guarda en `localStorage` (preferencia de quien mira). Las
+  terminales xterm cambian de fondo con el evento `studio-theme-change`.
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |

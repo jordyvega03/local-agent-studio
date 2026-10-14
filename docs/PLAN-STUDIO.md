@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **Fases 0 a 5 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **todas las fases hechas (0-6)** (2026-10-14). Siguientes ideas en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -114,7 +114,7 @@ FLOW_MAX_RETRIES=1                # Tester falla -> Coder reintenta una vez
 ```
 - `ai flow feature mi-app "tarea"`; en la web, diagrama de nodos con botón **Aprobar**.
 
-### Fase 6 — Extras
+### Fase 6 — Extras ✅ 2026-10-14
 Notificaciones de macOS, autocompletado zsh, tema claro/oscuro.
 
 ## Seguridad

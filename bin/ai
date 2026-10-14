@@ -46,6 +46,20 @@ confirm() {  # confirm "pregunta" -> 0 si sí
 }
 
 ollama_running() { curl -sf -m 2 "$OLLAMA_URL/api/version" >/dev/null 2>&1; }
+
+# Notificación de macOS. Título y texto van como argumentos de osascript (no se interpolan en
+# el AppleScript), así un nombre raro no puede inyectar nada. Dentro de un flujo (STAGE_OUT)
+# no avisa cada etapa: avisa el flujo.
+notify() {  # notify <título> <mensaje>
+  [ "${NOTIFY:-0}" = 1 ] && [ -z "${STAGE_OUT:-}" ] && command -v osascript >/dev/null || return 0
+  if [ -n "${NOTIFY_SOUND:-}" ]; then
+    osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv) sound name (item 3 of argv)' \
+      -e 'end run' "$1" "$2" "$NOTIFY_SOUND" >/dev/null 2>&1 || true
+  else
+    osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+      -e 'end run' "$1" "$2" >/dev/null 2>&1 || true
+  fi
+}
 docker_running() { docker info >/dev/null 2>&1; }
 
 model_installed() {
@@ -329,11 +343,13 @@ cmd_plan() {
         --allowedTools "Read" "Glob" "Grep" \
         --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
         | python3 "$AIWATCH" plan-stream "$EVENT_LOG" "$file"); then
-      PLAN_STATE=failed; rm -f "$file"; die "El planificador no devolvió nada."
+      PLAN_STATE=failed; rm -f "$file"; notify "ai · plan falló" "$(basename "$dir"): el planificador no devolvió nada"
+      die "El planificador no devolvió nada."
     fi
     PLAN_STATE=done
   fi
   ok "Plan guardado: ${file#$dir/}"
+  notify "ai · plan listo" "$(basename "$dir"): revísalo y lanza ai exec"
   echo "   Revísalo/edítalo y luego: ai exec $(basename "$dir")"
 }
 
@@ -455,11 +471,13 @@ $(cat "$step")"; then
       ai_event step_failed n="$n" secs="$(( $(date +%s) - t0 ))"
       ai_event exec_failed n="$n"
       EXEC_STATE=failed
+      notify "ai · falló el paso $n" "$(basename "$dir"): $title"
       warn "Falló el paso $n. Reanuda con: ai exec $(basename "$dir") $rel --from $n"; exit 1
     fi
   done
   EXEC_STATE=done
   ai_event exec_done
+  notify "ai · ejecución terminada" "$(basename "$dir"): $total pasos de $name"
   echo; ok "Plan completado. Revisa los cambios:"
   echo "   git -C \"$dir\" log --oneline $(git -C "$dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null || echo main)..HEAD"
   echo "   ai review $(basename "$dir")   # para que Opus revise el diff"
@@ -501,7 +519,8 @@ cmd_review() {
     # Salida JSON: aiwatch imprime la revisión, la guarda y registra los tokens de Opus.
     (cd "$dir" && git diff "$base...HEAD" | claude -p "$prompt" --model "$PLANNER_MODEL" --output-format json \
       --allowedTools "Read" "Glob" "Grep" --disallowedTools "Edit" "Write" "Bash" \
-      | python3 "$AIWATCH" review-out "$EVENT_LOG" "$out") || die "La revisión falló."
+      | python3 "$AIWATCH" review-out "$EVENT_LOG" "$out") || { notify "ai · revisión falló" "$(basename "$dir")"; die "La revisión falló."; }
+    notify "ai · revisión lista" "$(basename "$dir"): mírala en la terminal o en el Studio"
   elif (cd "$dir" && git diff "$base...HEAD" | claude -p "$prompt" --model "$PLANNER_MODEL" \
       --allowedTools "Read" "Glob" "Grep" --disallowedTools "Edit" "Write" "Bash" | tee "$out"); then
     ai_event review_done
@@ -579,9 +598,10 @@ TAREA: $task" --model "$model" --output-format stream-json --verbose \
         --allowedTools "Read" "Glob" "Grep" \
         --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
         | python3 "$AIWATCH" plan-stream "$EVENT_LOG" "$dir/.ai/logs/$run.result.md" agent); then
-      AGENT_STATE=done; ok "Resultado: .ai/logs/$run.result.md"; return 0
+      AGENT_STATE=done; ok "Resultado: .ai/logs/$run.result.md"
+      notify "ai · agente $label terminado" "$(basename "$dir"): $task"; return 0
     fi
-    AGENT_STATE=failed; die "El agente no devolvió nada."
+    AGENT_STATE=failed; notify "ai · agente $label falló" "$(basename "$dir")"; die "El agente no devolvió nada."
   fi
 
   # Motor aider: en el contenedor; si escribe, en su propia rama (o la ai/* actual).
@@ -606,7 +626,7 @@ $task"; then
   else
     ai_event step_failed n=1 secs="$(( $(date +%s) - t0 ))"
     ai_event exec_failed n=1; ai_event agent_failed error="el agente falló"
-    AGENT_STATE=failed; die "Falló el agente $label."
+    AGENT_STATE=failed; notify "ai · agente $label falló" "$(basename "$dir"): $task"; die "Falló el agente $label."
   fi
   meter_context
 
@@ -619,7 +639,8 @@ $task"; then
     else
       ai_event step_failed n=2 secs="$(( $(date +%s) - t1 ))"
       ai_event exec_failed n=2; ai_event agent_failed error="la verificación falló: $vcmd"
-      AGENT_STATE=failed; die "La verificación falló ($vcmd). Revisa la salida de arriba."
+      AGENT_STATE=failed; notify "ai · verificación falló" "$(basename "$dir"): $vcmd"
+      die "La verificación falló ($vcmd). Revisa la salida de arriba."
     fi
   elif [ "$engine" = aider ] && [ -n "$verify" ]; then
     warn "No se detectó cómo comprobar el proyecto. Fíjalo en $dir/.ai/project.env: VERIFY_CMD='npm test'"
@@ -628,6 +649,7 @@ $task"; then
   ai_event agent_done secs="$(( $(date +%s) - t0 ))"
   AGENT_STATE=done
   ok "Agente $label terminado."
+  notify "ai · agente $label terminado" "$(basename "$dir"): $task"
 }
 
 # --- Flujos multiagente (flows/*.env) -----------------------------------------
@@ -656,6 +678,7 @@ flow_wait_approval() {  # flow_wait_approval <i> <etapa> <archivo-decisión>
   rm -f "$dec"
   if [ "$FLOW_YES" = 1 ]; then ai_event flow_approved i="$i" by=auto; return 0; fi
   ai_event flow_waiting i="$i" stage="$stage"
+  notify "ai · el flujo espera tu aprobación" "Tras la etapa $stage. Apruébalo en su terminal o en el Studio"
   echo
   warn "Pausa del flujo tras '$stage'. Revisa el resultado (p. ej. edita el plan en el Studio)."
   printf "%s" "¿Continuar el flujo? [s/n] (o Aprobar/Rechazar en el Studio) "
@@ -761,7 +784,8 @@ $(tail -n 60 "$vlog" | sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" | tr -d 
     else
       ai_event stage_failed i="$i" stage="$st" run="$child" secs="$(( $(date +%s) - t0 ))" attempts="$attempt"
       ai_event flow_failed error="falló la etapa $i ($st)"
-      FLOW_STATE=failed; die "El flujo se detuvo en la etapa $i ($st)."
+      FLOW_STATE=failed; notify "ai · flujo $label detenido" "$(basename "$dir"): falló la etapa $i ($st)"
+      die "El flujo se detuvo en la etapa $i ($st)."
     fi
 
     case " $approve " in
@@ -774,6 +798,7 @@ $(tail -n 60 "$vlog" | sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" | tr -d 
   done
   ai_event flow_done
   FLOW_STATE=done
+  notify "ai · flujo $label completado" "$(basename "$dir"): $total etapas"
   echo; ok "Flujo $label completado ($total etapas)."
 }
 
@@ -894,6 +919,17 @@ cmd_use() {
   if ollama_running; then unload_models; model_installed "$m" || OLLAMA_HOST="$OLLAMA_HOST" ollama pull "$m"; fi
 }
 
+# Autocompletado de zsh (completions/_ai). Solo imprime las instrucciones: no toca tu ~/.zshrc.
+cmd_completion() {
+  echo "Autocompletado de ai para zsh. Añade estas dos líneas al final de tu ~/.zshrc:"
+  echo
+  echo "  fpath=($AI_HOME/completions \$fpath)"
+  echo "  autoload -Uz compinit && compinit"
+  echo
+  echo "Después abre una terminal nueva (o: exec zsh) y prueba: ai <Tab>, ai agent <Tab>…"
+  echo "Si usas oh-my-zsh, pon la línea fpath ANTES de 'source \$ZSH/oh-my-zsh.sh' y omite la de compinit."
+}
+
 cmd_help() {
   cat <<EOF
 ${c_blue}ai${c_off} — agente local de desarrollo (Opus planifica, $EXECUTOR_MODEL ejecuta)
@@ -930,6 +966,7 @@ ${c_dim}Modelos${c_off}
 
 ${c_dim}Otros${c_off}
   ai logs               Log de Ollama
+  ai completion         Cómo activar el autocompletado de zsh
   ai config             Abre config.env
 
 <proyecto> = ruta, o nombre de carpeta dentro de $PROJECTS_ROOT
@@ -961,6 +998,7 @@ case "$cmd" in
   rm)        ollama_running || start_ollama; OLLAMA_HOST="$OLLAMA_HOST" ollama rm "${1:?modelo}" ;;
   logs)      tail -n "${1:-50}" -f "$LOG_DIR/ollama.log" ;;
   config)    "${EDITOR:-open}" "$AI_HOME/config.env" ;;
+  completion) cmd_completion ;;
   help|-h|--help) cmd_help ;;
   *) die "Comando desconocido: $cmd (ai help)" ;;
 esac

@@ -145,6 +145,16 @@ ai flow feature mi-app "…" --yes                    # sin pausas (aprueba solo
 - Cada etapa crea su propia sesión (visible en el Studio); la del flujo las enlaza.
 - Formato y cómo crear los tuyos: `flows/README.md`.
 
+### Extras: notificaciones, autocompletado y tema
+
+- **Notificaciones de macOS** al terminar o fallar `plan`, `exec`, `review`, agentes y
+  flujos, y cuando un flujo **espera tu aprobación** (dentro de un flujo solo avisa el
+  flujo). `NOTIFY=0` en `config.env` las apaga; `NOTIFY_SOUND` elige el sonido. La primera
+  vez macOS puede pedir permiso para "Editor de Scripts" (Ajustes → Notificaciones).
+- **Autocompletado zsh**: `ai completion` imprime las líneas para tu `~/.zshrc`. Completa
+  comandos, proyectos (de `PROJECTS_ROOT`), planes, agentes, flujos y modelos.
+- **Tema del Studio**: selector automático (como macOS) / claro / oscuro en la cabecera.
+
 ### Ver a los agentes trabajar (panel web)
 
 ```bash
@@ -251,6 +261,7 @@ ai down --all    # además cierra Docker Desktop (libera también su VM)
 | `ai architect <proy>` | Aider architect: Opus + local en un solo chat (requiere `ANTHROPIC_API_KEY`) |
 | `ai agent list` / `ai agent <id> <proy> "tarea"` | Agentes con roles (`agents/*.env`) |
 | `ai flow list` / `ai flow <id> <proy> "tarea" [--yes]` | Flujos multiagente (`flows/*.env`) |
+| `ai completion` | Cómo activar el autocompletado de zsh (`completions/_ai`) |
 | `ai build` | (Re)construye la imagen del ejecutor (Aider + Node + pytest) |
 | `ai models` / `ai pull X` / `ai rm X` | Gestión de modelos |
 | `ai use <modelo>` | Cambia el ejecutor en `config.env` |
@@ -270,6 +281,7 @@ agents/
 │       └── model-settings.yml   # ajustes por modelo (num_ctx, edit_format)
 ├── agents/*.env                 # agentes con roles (formato en agents/README.md)
 ├── flows/*.env                  # flujos multiagente (formato en flows/README.md)
+├── completions/_ai              # autocompletado de zsh (ai completion)
 ├── prompts/planner.md           # instrucciones que recibe Opus para planificar
 ├── prompts/agents/*.md          # instrucciones de cada agente
 ├── docker/executor/Dockerfile   # imagen del ejecutor: Aider + Node + pytest

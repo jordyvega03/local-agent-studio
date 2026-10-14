@@ -9,6 +9,7 @@ import { AgentRunCard, AnalysisCard, ExecutionCard, FlowCard, Pipeline, ReviewCa
 import { TokensView } from "./components/Tokens.tsx";
 import { Brand, Sidebar } from "./components/Sidebar.tsx";
 import { SystemChips } from "./components/SystemChips.tsx";
+import { ThemeToggle } from "./components/ThemeToggle.tsx";
 import { SystemView } from "./components/System.tsx";
 import { TerminalCard, type TerminalHandle } from "./components/Terminal.tsx";
 import { Code, cx } from "./components/ui.tsx";
@@ -134,6 +135,7 @@ export function App() {
             ))}
           </div>
           <SystemChips system={live.system} connected={live.connected} />
+          <ThemeToggle />
           {/* Móvil: selectores en lugar de la barra lateral */}
           {projects && projects.length > 0 && (
             <div className="flex w-full gap-2 lg:hidden">

@@ -33,10 +33,12 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
       distintos).
 - [ ] `ai plan --interactive`: abrir Claude Code en modo plan para discutir antes de
       escribir el plan.
-- [ ] Notificación de macOS al terminar `ai exec` (`osascript -e 'display notification …'`).
-- [ ] Autocompletado zsh para `ai` (comandos y proyectos de `PROJECTS_ROOT`).
 
 ## Hecho
+
+- [x] 2026-10-14 — **AI Studio, Fase 6 (extras)**: notificaciones de macOS (fin/fallo de
+      plan, exec, review, agentes y flujos; flujo esperando aprobación), autocompletado zsh
+      (`ai completion`) y selector de tema automático/claro/oscuro en el Studio.
 
 - [x] 2026-10-14 — **AI Studio, Fase 5**: flujos multiagente (`ai flow`, `flows/*.env`):
       feature (plan → aprobación → exec → tester → review) y quickfix (coder → tester),

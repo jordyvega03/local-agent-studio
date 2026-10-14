@@ -5,6 +5,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { Ban, Bot, Brain, CircleCheck, Workflow, CircleX, Clock, Cpu, Hammer, Loader2, MessagesSquare, Play, Power, ScanSearch,
   SquareTerminal } from "lucide-react";
+import { THEME_EVENT, termBackground } from "../theme.ts";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import type { AgentDef, FlowDef, JobAction, JobRequest, JobStatus, JobSummary, Project } from "../../../shared/types.ts";
 import { getAgents, getFlows, getModels } from "../api.ts";
@@ -266,12 +267,14 @@ export function JobTerminal({ ref, job, onInput, onResize }: {
     t.onData((d) => inputRef.current(d));
     t.onResize(({ cols, rows }) => resizeRef.current(cols, rows));
     const ro = new ResizeObserver(() => f.fit());
+    const onTheme = () => { t.options.theme = { ...t.options.theme, background: termBackground() }; };
+    window.addEventListener(THEME_EVENT, onTheme);
     ro.observe(box.current!);
     term.current = t;
     fit.current = f;
     for (const q of queue.current) { if (q.reset) t.reset(); t.write(q.bytes); }
     queue.current = [];
-    return () => { ro.disconnect(); t.dispose(); term.current = null; };
+    return () => { ro.disconnect(); window.removeEventListener(THEME_EVENT, onTheme); t.dispose(); term.current = null; };
   }, []);
 
   // Al cambiar de trabajo: limpia y avisa del tamaño (la repetición llega por job_output).
