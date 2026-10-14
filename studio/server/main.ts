@@ -9,7 +9,9 @@ import Fastify from "fastify";
 import { loadConfig } from "./config.ts";
 import { ActionError, buildAction, resolveProject } from "./actions.ts";
 import { AgentError, listAgents, saveAgent, validateAgent } from "./agents.ts";
+import { listDocs, readDoc } from "./docs.ts";
 import { listFlows } from "./flows.ts";
+import { branchCommits, branchDiff, GitError, projectGit } from "./git.ts";
 import { Jobs } from "./jobs.ts";
 import { handleSocket } from "./live.ts";
 import { Metrics } from "./metrics.ts";
@@ -125,6 +127,26 @@ app.put("/api/plan", async (req, reply) => {
     throw err;
   }
 });
+// Pestaña Proyecto (solo lectura): ramas ai/*, commits, diff y documentos del proyecto.
+// Solo proyectos registrados por bin/ai, igual que el resto de lecturas.
+const projectParam = (q: Record<string, string | undefined>) => {
+  const dir = q.project ?? "";
+  if (!registeredProjects(cfg.aiHome).includes(dir)) throw new GitError("Proyecto no válido.");
+  return dir;
+};
+const gitRoute = (fn: (q: Record<string, string | undefined>) => Promise<unknown>) =>
+  async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
+    try { return await fn(req.query as Record<string, string | undefined>); } catch (err) {
+      if (err instanceof GitError || (err instanceof Error && /documento/.test(err.message))) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  };
+app.get("/api/git", gitRoute(async (q) => projectGit(projectParam(q))));
+app.get("/api/git/commits", gitRoute(async (q) => branchCommits(projectParam(q), q.branch ?? "")));
+app.get("/api/git/diff", gitRoute(async (q) => branchDiff(projectParam(q), q.branch ?? "", q.commit || undefined)));
+app.get("/api/docs", gitRoute(async (q) => listDocs(projectParam(q))));
+app.get("/api/docs/file", gitRoute(async (q) => ({ path: q.path, text: readDoc(projectParam(q), q.path ?? "") })));
+
 app.get("/ws", { websocket: true }, (socket) => handleSocket(socket, cfg, metrics, jobs));
 
 if (existsSync(cfg.uiDist)) {

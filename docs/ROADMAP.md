@@ -25,6 +25,12 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Ideas
 
+- [ ] **Documentación de APIs interactiva**: `openapi.yaml` por proyecto mostrado en el
+      Studio (Scalar o Swagger UI, sin CDN) con "probar" contra el servidor local (puertos en
+      `config.env`), importable en Insomnia/Bruno, y un agente "API docs" que lo mantenga.
+- [ ] **Diagramas Mermaid** en los documentos de la pestaña Proyecto, cuando mermaid 12.2.0
+      (sin los avisos de KaTeX/lodash-es de la 12.0/12.1) tenga al menos dos semanas.
+
 - [ ] Probar **Docker Model Runner** (`docker model run`) como backend alternativo a
       Ollama (también usa Metal). Comparar velocidad y memoria.
 - [ ] Probar **MLX** (LM Studio o `mlx_lm.server`) como backend: suele ser algo más rápido
@@ -35,6 +41,11 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
       escribir el plan.
 
 ## Hecho
+
+- [x] 2026-10-14 — **Pestaña Proyecto** en el Studio: ramas `ai/*` con diff visual
+      (unificado o lado a lado, por rama o por commit), commits, enlace a su sesión,
+      comandos para fusionar/descartar, y documentación Markdown del proyecto renderizada
+      y saneada.
 
 - [x] 2026-10-14 — **Prueba real con Opus** del flujo feature (plan, exec, tester, review):
       todo funciona. Arreglos de lo que encontró la revisión: el Tester completa los tests

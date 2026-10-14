@@ -3,6 +3,7 @@ import type { JobRequest, RunState } from "../../shared/types.ts";
 import { cancelJob, startJob } from "./api.ts";
 import { JobsList, JobTerminal, LaunchForm, type JobTerminalHandle, type LaunchPreset } from "./components/Actions.tsx";
 import { AgentsView } from "./components/Agents.tsx";
+import { ProjectView } from "./components/Project.tsx";
 import { STATUS_LABEL } from "./format.ts";
 import { useLive } from "./live.ts";
 import { AgentRunCard, AnalysisCard, ExecutionCard, FlowCard, Pipeline, ReviewCard, SessionActions, SessionTokensCard } from "./components/Session.tsx";
@@ -14,14 +15,14 @@ import { SystemView } from "./components/System.tsx";
 import { TerminalCard, type TerminalHandle } from "./components/Terminal.tsx";
 import { Code, cx } from "./components/ui.tsx";
 
-type View = "session" | "actions" | "agents" | "system" | "tokens";
+type View = "session" | "project" | "actions" | "agents" | "system" | "tokens";
 
 /** Mismo criterio que defaultStep() del servidor: el paso actual o el último con salida. */
 const followStep = (r: RunState | null) => r ? r.exec.current ?? r.exec.logs.at(-1) ?? r.exec.steps[0]?.n ?? null : null;
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
-  return { project: p.get("project") ?? "", run: p.get("run") ?? "", view: (["system", "tokens", "actions", "agents"].includes(p.get("view") ?? "") ? p.get("view") : "session") as View };
+  return { project: p.get("project") ?? "", run: p.get("run") ?? "", view: (["system", "tokens", "actions", "agents", "project"].includes(p.get("view") ?? "") ? p.get("view") : "session") as View };
 }
 
 export function App() {
@@ -113,18 +114,19 @@ export function App() {
         <header className="sticky top-0 z-10 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-panel/95 px-4 py-2.5 backdrop-blur">
           <div className="min-w-0 flex-1">
             <div className="truncate font-semibold">
-              {view === "system" ? "Sistema" : view === "tokens" ? "Tokens" : view === "actions" ? "Acciones" : view === "agents" ? "Agentes" : run?.plan.title || run?.name || "AI Studio"}
+              {view === "system" ? "Sistema" : view === "tokens" ? "Tokens" : view === "actions" ? "Acciones" : view === "agents" ? "Agentes" : view === "project" ? `Proyecto · ${current?.name ?? ""}` : run?.plan.title || run?.name || "AI Studio"}
             </div>
             <div className="truncate text-xs text-muted">
               {view === "system" ? "CPU, GPU y memoria del Mac en tiempo real"
                 : view === "tokens" ? "Lo que genera el ejecutor, petición a petición"
                 : view === "actions" ? "Lanza plan, ejecución o revisión y sigue la terminal en vivo"
                 : view === "agents" ? "Coder, Tester, Reviewer, Docs… y los que crees tú"
+                : view === "project" ? "Qué cambiaron los agentes en cada rama y la documentación del proyecto"
                 : current ? `${current.name} · ${sel.run}` : "Sin proyecto"}
             </div>
           </div>
           <div className="flex rounded-lg border border-line bg-panel-2 p-0.5 text-xs" role="tablist" aria-label="Vista">
-            {([["session", "Sesión"], ["actions", "Acciones"], ["agents", "Agentes"], ["tokens", "Tokens"], ["system", "Sistema"]] as const).map(([v, label]) => (
+            {([["session", "Sesión"], ["project", "Proyecto"], ["actions", "Acciones"], ["agents", "Agentes"], ["tokens", "Tokens"], ["system", "Sistema"]] as const).map(([v, label]) => (
               <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}
                 className={cx("rounded-md px-3 py-1", view === v ? "bg-panel font-semibold text-fg shadow-sm" : "text-muted hover:text-fg")}>
                 {label}
@@ -155,6 +157,7 @@ export function App() {
           {view === "system" && <SystemView metrics={live.metrics} history={live.history} system={live.system} />}
           {view === "tokens" && <TokensView tokens={live.tokens} />}
           {view === "agents" && <AgentsView onUse={useAgent} onUseFlow={useFlow} />}
+          {view === "project" && <ProjectView project={sel.project} onOpenRun={(name) => select(sel.project, name)} />}
           {/* Acciones: oculta (no desmontada) para que la terminal conserve el trabajo */}
           <div className={cx("grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]", view !== "actions" && "hidden")}>
             <div className="flex min-w-0 flex-col gap-4">

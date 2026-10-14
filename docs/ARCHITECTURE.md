@@ -246,6 +246,23 @@ ai flow feature mi-app "tarea"
   (`prefers-color-scheme`). Se guarda en `localStorage` (preferencia de quien mira). Las
   terminales xterm cambian de fondo con el evento `studio-theme-change`.
 
+## Pestaña Proyecto (diff visual y documentos)
+
+- **`server/git.ts`** (solo lectura): `git` con `execFile` (sin shell). Ramas `ai/*` con
+  commits por delante/detrás de la base (main, master o la primera que no sea `ai/*`), diff
+  `base...rama` o de un commit (`git show`), parseado a archivos/bloques/líneas con su
+  numeración. Solo acepta ramas que existen (no la base) y commits de 40 hex que pertenecen
+  a `base..rama`: nada que llegue de la web se pasa a git sin comprobarlo. Recorta archivos
+  enormes (3000 líneas por archivo, 20000 en total).
+- **`server/docs.ts`**: lista Markdown de la raíz, `docs/`, `apps/*`, `packages/*` y
+  `.ai/plans` (sin `node_modules`, `.git`…) y solo sirve rutas de esa lista que sigan dentro
+  del proyecto con `realpath` (un enlace simbólico que sale, no).
+- **UI**: `marked` → HTML → **DOMPurify** (perfil solo HTML, sin `style`, `form` ni
+  imágenes; casillas siempre desactivadas). Enlaces a otro `.md` del proyecto se abren en el
+  visor; `http(s)` en otra pestaña; el resto (p. ej. `javascript:`), nada.
+- Mermaid queda pendiente: la versión sin avisos de seguridad (12.2.0) es demasiado reciente
+  (ver ROADMAP); los bloques `mermaid` se muestran como código.
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |

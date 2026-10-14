@@ -281,6 +281,34 @@ export interface JobSummary {
   cancelling?: boolean;
 }
 
+// --- Pestaña Proyecto: ramas del agente, diff y documentos ------------------------
+export interface CommitInfo { full?: string; hash: string; date: string; author?: string; subject: string }
+
+export interface BranchInfo {
+  name: string;            // ai/<plan o sesión>
+  ahead: number;           // commits que la base no tiene
+  behind: number;          // commits de la base que la rama no tiene
+  last: CommitInfo;
+  run?: string;            // sesión del Studio que la creó
+}
+
+export interface ProjectGit { isRepo: boolean; current: string | null; base: string | null; branches: BranchInfo[] }
+
+export interface DiffLine { type: "add" | "del" | "ctx"; old?: number; new?: number; text: string }
+export interface DiffHunk { header: string; lines: DiffLine[] }
+export interface DiffFile {
+  path: string;
+  oldPath?: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  truncated: boolean;
+  hunks: DiffHunk[];
+}
+
+export interface DocEntry { path: string; group: "root" | "docs" | "plan"; size: number }
+
 // --- Protocolo WebSocket (/ws) -------------------------------------------------
 export type ClientMessage =
   | { type: "subscribe"; project: string; run: string; step: number | null }

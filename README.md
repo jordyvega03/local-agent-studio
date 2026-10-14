@@ -219,6 +219,10 @@ Lo lanzado desde la web queda registrado igual que desde la terminal. Si paras e
   agente aparece en Sesión con su tarjeta (motor, tarea, lo que leyó o respondió), sus
   pasos (agente + verificación), su salida y sus tokens.
 
+- **Proyecto**: las ramas `ai/…` que crearon los agentes con su **diff visual** frente a la
+  rama base (unificado o lado a lado, por rama o por commit), sus commits, enlace a la
+  sesión que las creó y los comandos para fusionar o descartar (para copiar: la web no toca
+  tu `main`). Y la **documentación** del proyecto (README, `docs/`, planes) renderizada.
 - **Flujos** (Fase 5): en Agentes, la lista de flujos con sus etapas, pausas y reintentos
   ("Usar"); en Sesión, el flujo como diagrama de etapas con enlace a la sesión de cada una y
   los botones **Aprobar / Rechazar** cuando espera (sirven también para flujos lanzados

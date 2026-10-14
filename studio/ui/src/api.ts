@@ -27,3 +27,14 @@ export const updateAgent = (def: import("../../shared/types.ts").AgentDef) =>
 export const getFlows = () => call<import("../../shared/types.ts").FlowDef[]>("GET", "/api/flows");
 export const decideFlow = (project: string, run: string, decision: "approve" | "reject") =>
   call<{ ok: true }>("POST", "/api/flows/decision", { project, run, decision });
+
+// Pestaña Proyecto (solo lectura)
+const q = (p: Record<string, string | undefined>) =>
+  Object.entries(p).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join("&");
+export const getProjectGit = (project: string) => call<import("../../shared/types.ts").ProjectGit>("GET", `/api/git?${q({ project })}`);
+export const getCommits = (project: string, branch: string) =>
+  call<import("../../shared/types.ts").CommitInfo[]>("GET", `/api/git/commits?${q({ project, branch })}`);
+export const getDiff = (project: string, branch: string, commit?: string) =>
+  call<{ files: import("../../shared/types.ts").DiffFile[]; truncated: boolean; base: string }>("GET", `/api/git/diff?${q({ project, branch, commit })}`);
+export const getDocs = (project: string) => call<import("../../shared/types.ts").DocEntry[]>("GET", `/api/docs?${q({ project })}`);
+export const getDoc = (project: string, path: string) => call<{ path: string; text: string }>("GET", `/api/docs/file?${q({ project, path })}`);
