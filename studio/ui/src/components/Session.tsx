@@ -1,8 +1,9 @@
 // Vista de una sesión (un plan): etapas, análisis de Opus, pasos del ejecutor y revisión.
-import { ArrowRight, Bot, Brain, Coins, MessagesSquare, Pencil, Play, RotateCcw, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
+import { ArrowRight, Bot, Brain, Coins, Hand, Workflow, MessagesSquare, Pencil, Play, RotateCcw, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
   MessageSquare, ScanSearch, Wrench } from "lucide-react";
 import { lazy, Suspense, useState, type ReactNode } from "react";
-import type { JobRequest, RunState, Status } from "../../../shared/types.ts";
+import type { FlowStage, JobRequest, RunState, Status } from "../../../shared/types.ts";
+import { decideFlow } from "../api.ts";
 // El editor (CodeMirror) se carga solo al abrirlo: no pesa en la carga inicial.
 const PlanEditor = lazy(() => import("./PlanEditor.tsx").then((m) => ({ default: m.PlanEditor })));
 import { clock, compact, duration, secondsSince, tokS } from "../format.ts";
@@ -265,6 +266,67 @@ export function AgentRunCard({ run, onAction, project }: { run: RunState; projec
       )}
       {a.result && <pre className="max-h-[28rem] overflow-auto rounded-lg bg-panel-2 p-3 font-mono text-xs whitespace-pre-wrap">{a.result}</pre>}
       {a.engine === "aider" && !a.result && <p className="text-xs text-muted">Lo que hizo está en los pasos y su salida, a la derecha.</p>}
+    </Card>
+  );
+}
+
+const STAGE_ICON = (stage: string) =>
+  stage === "plan" ? <Brain className="size-4" /> : stage === "exec" ? <Hammer className="size-4" /> : stage === "review" ? <ScanSearch className="size-4" /> : <Bot className="size-4" />;
+const STAGE_NAME: Record<string, string> = { plan: "Plan (Opus)", exec: "Ejecución", review: "Revisión (Opus)" };
+
+/** Un flujo: sus etapas como diagrama, la pausa para aprobar y el enlace a cada sesión hija. */
+export function FlowCard({ run, project, onOpenRun }: { run: RunState; project: string; onOpenRun: (name: string) => void }) {
+  const f = run.flow!;
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const waitingStage: FlowStage | undefined = f.waiting != null ? f.stages[f.waiting - 1] : undefined;
+  const decide = async (decision: "approve" | "reject") => {
+    setBusy(decision); setError(null);
+    try { await decideFlow(project, run.name, decision); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
+  return (
+    <Card title={`Flujo ${f.label ?? f.flow ?? ""}`} icon={<Workflow className="size-4 text-muted" />} status={f.status}>
+      <p className="mb-3 text-xs"><span className="text-muted">Tarea: </span>{f.task}</p>
+      <ol className="flex flex-wrap items-stretch gap-2" aria-label="Etapas del flujo">
+        {f.stages.map((s) => (
+          <li key={s.i} className="flex items-center gap-2">
+            {s.i > 1 && <ArrowRight className="size-4 shrink-0 text-muted" aria-hidden />}
+            <div className={cx("flex min-w-[150px] items-center gap-2.5 rounded-xl border bg-panel px-3 py-2", NODE_RING[s.status],
+              f.waiting === s.i && "border-run")}>
+              <div className={cx("grid size-8 shrink-0 place-items-center rounded-full", NODE_ICON[s.status])}>{STAGE_ICON(s.stage)}</div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+                  {s.i}. {STAGE_NAME[s.stage] ?? s.stage}
+                  {f.approve.includes(s.stage) && <Hand className="size-3.5 text-run" aria-label="pausa para aprobar" />}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted">
+                  <StatusBadge status={s.status} />
+                  {s.secs != null && <span className="tabular-nums">{duration(s.secs)}</span>}
+                  {s.attempts ? <span className="text-run">· {s.attempts} reintento{s.attempts > 1 ? "s" : ""}</span> : null}
+                </div>
+                {s.run && <button onClick={() => onOpenRun(s.run!)} className="text-[11px] text-accent hover:underline">ver sesión</button>}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {waitingStage && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-run bg-run-bg px-3 py-2" role="status">
+          <Hand className="size-4 text-run" aria-hidden />
+          <span className="text-sm text-fg">
+            Esperando tu aprobación tras <b>{STAGE_NAME[waitingStage.stage] ?? waitingStage.stage}</b>.
+            {waitingStage.run && <> Revisa (o edita) su <button className="text-accent hover:underline" onClick={() => onOpenRun(waitingStage.run!)}>sesión</button> antes.</>}
+          </span>
+          <span className="ml-auto flex gap-2">
+            <button onClick={() => void decide("reject")} disabled={busy !== null}
+              className="rounded-md border border-line bg-panel px-3 py-1 text-xs text-muted hover:border-fail hover:text-fail disabled:opacity-50">Rechazar</button>
+            <button onClick={() => void decide("approve")} disabled={busy !== null}
+              className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">{busy === "approve" ? "Aprobando…" : "Aprobar y continuar"}</button>
+          </span>
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs text-fail">{error}</p>}
+      {f.error && <p className="mt-2 text-xs text-fail">{f.error}</p>}
     </Card>
   );
 }

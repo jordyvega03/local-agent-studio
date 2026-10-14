@@ -38,6 +38,11 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-14 — **AI Studio, Fase 5**: flujos multiagente (`ai flow`, `flows/*.env`):
+      feature (plan → aprobación → exec → tester → review) y quickfix (coder → tester),
+      reintentos con el agente de arreglo, aprobación desde la terminal o el Studio y
+      diagrama del flujo en Sesión.
+
 - [x] 2026-10-14 — **AI Studio, Fase 4**: agentes con roles (`ai agent`, `agents/*.env`):
       coder, tester, reviewer, docs; verificación automática en el contenedor; imagen propia
       del ejecutor (Aider + Node + pytest, `ai build`); pestaña Agentes para crearlos y

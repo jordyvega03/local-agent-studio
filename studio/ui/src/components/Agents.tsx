@@ -1,8 +1,8 @@
 // Vista "Agentes" (Fase 4): los agentes de agents/*.env. Verlos, crearlos, editarlos y usarlos.
-import { Bot, Cloud, Container, Eye, Loader2, Pencil, Play, Plus, Save, ShieldCheck, X } from "lucide-react";
+import { ArrowRight, Bot, Cloud, Container, Eye, Hand, Loader2, Pencil, Play, Plus, RotateCcw, Save, ShieldCheck, Workflow, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { AgentDef } from "../../../shared/types.ts";
-import { createAgent, getAgents, getModels, updateAgent } from "../api.ts";
+import type { AgentDef, FlowDef } from "../../../shared/types.ts";
+import { createAgent, getAgents, getFlows, getModels, updateAgent } from "../api.ts";
 import { Card, Code, cx, Empty } from "./ui.tsx";
 
 const inputCls = "w-full rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-50";
@@ -100,8 +100,10 @@ function AgentEditor({ initial, isNew, onClose, onSaved }: { initial: AgentDef; 
   );
 }
 
-export function AgentsView({ onUse }: { onUse: (agentId: string) => void }) {
+export function AgentsView({ onUse, onUseFlow }: { onUse: (agentId: string) => void; onUseFlow: (flowId: string) => void }) {
   const [agents, setAgents] = useState<AgentDef[] | null>(null);
+  const [flows, setFlows] = useState<FlowDef[] | null>(null);
+  useEffect(() => { getFlows().then(setFlows).catch(() => setFlows([])); }, []);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ def: AgentDef; isNew: boolean } | null>(null);
   const load = () => getAgents().then(setAgents).catch((e) => setError(String(e.message)));
@@ -145,6 +147,41 @@ export function AgentsView({ onUse }: { onUse: (agentId: string) => void }) {
           </button>
         </div>
       )}
+      <h2 className="mt-2 flex items-center gap-2 text-sm font-semibold"><Workflow className="size-4 text-muted" />Flujos</h2>
+      {!flows ? <Empty>Cargando flujos…</Empty> : flows.length === 0 ? <Empty>No hay flujos en flows/.</Empty> : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {flows.map((f) => (
+            <section key={f.id} className="flex min-w-0 flex-col gap-2 rounded-xl border border-line bg-panel p-4">
+              <div>
+                <div className="flex items-center gap-2 font-semibold"><Workflow className="size-4 text-muted" />{f.name}</div>
+                <div className="font-mono text-[11px] text-muted">flows/{f.id}.env</div>
+              </div>
+              <p className="text-sm text-muted">{f.description}</p>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {f.steps.map((s, k) => (
+                  <span key={k} className="flex items-center gap-1.5">
+                    {k > 0 && <ArrowRight className="size-3 text-muted" aria-hidden />}
+                    <span className="rounded-md border border-line bg-panel-2 px-2 py-0.5 font-medium">{s}</span>
+                    {f.approve.includes(s) && <Hand className="size-3.5 text-run" aria-label="pausa para aprobar" />}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {f.approve.length > 0 && <Badge tone="warn"><Hand className="size-3" />aprobación tras {f.approve.join(", ")}</Badge>}
+                {f.retries > 0 && <Badge><RotateCcw className="size-3" />{f.retries} reintento{f.retries > 1 ? "s" : ""} con {f.fix}</Badge>}
+              </div>
+              <button onClick={() => onUseFlow(f.id)}
+                className="mt-auto flex items-center justify-center gap-1.5 rounded-md border border-accent px-3 py-1.5 text-xs font-semibold text-fg hover:bg-panel-2">
+                <Play className="size-3.5" />Usar
+              </button>
+            </section>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-muted">
+        Los flujos se editan en <Code>flows/*.env</Code> (formato en <Code>flows/README.md</Code>) y se lanzan con <Code>ai flow &lt;id&gt; &lt;proyecto&gt; "tarea"</Code>.
+      </p>
+
       <p className="text-xs text-muted">
         También desde la terminal: <Code>ai agent list</Code> y <Code>ai agent &lt;id&gt; &lt;proyecto&gt; "tarea"</Code>. Los agentes que escriben
         trabajan en el contenedor, en una rama <Code>ai/…</Code>; los de Opus solo leen.

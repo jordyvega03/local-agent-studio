@@ -32,9 +32,12 @@ Formato de los registros: proyecto/.ai/logs/<plan>.jsonl, un objeto por línea c
 "ts" (ISO 8601), "type" y campos libres. Tipos: plan_started, plan_tool, plan_note,
 plan_done, plan_failed, plan_aborted, exec_started, step_started, step_done,
 step_failed, exec_done, exec_failed, exec_aborted, review_started, review_done,
-review_failed, agent_started, agent_tool, agent_note, agent_done, agent_failed.
+review_failed, agent_started, agent_tool, agent_note, agent_done, agent_failed,
+flow_started, stage_started, stage_done, stage_failed, flow_retry, flow_waiting,
+flow_approved, flow_rejected, flow_done, flow_failed, flow_aborted.
 Una ejecución de `ai agent` reutiliza exec_*/step_* para sus pasos (1 = el agente,
-2 = la verificación) y añade agent_* con los datos del agente.
+2 = la verificación) y añade agent_* con los datos del agente. Una de `ai flow` registra
+sus etapas (stage_*) con el nombre de la sesión que creó cada una (run).
 """
 import glob
 import http.client
@@ -533,6 +536,7 @@ def run_state(pdir, name):
     review = {"status": "pending"}
     opus = {}
     agent = None
+    flow = None
     steps = {s["n"]: s for s in execu["steps"]}
 
     def step(n):
@@ -601,6 +605,37 @@ def run_state(pdir, name):
                     opus[k] = opus.get(k, 0) + ev[k]
         elif t == "agent_failed" and agent is not None:
             agent.update(status="failed", finished=ts, error=ev.get("error") or "falló")
+        elif t == "flow_started":
+            flow = {"status": "running", "started": ts, "waiting": None,
+                    **{k: ev.get(k) for k in ("flow", "label", "task", "retries", "fix") if ev.get(k) is not None},
+                    "approve": str(ev.get("approve") or "").split(),
+                    "stages": [{"i": n + 1, "stage": st, "status": "pending"}
+                               for n, st in enumerate(str(ev.get("stages") or "").split())]}
+        elif t in ("stage_started", "stage_done", "stage_failed", "flow_retry") and flow is not None:
+            i = ev.get("i")
+            if isinstance(i, int) and 1 <= i <= len(flow["stages"]):
+                stg = flow["stages"][i - 1]
+                if t == "stage_started":
+                    stg.update(status="running", started=ts)
+                elif t == "flow_retry":
+                    stg["attempts"] = ev.get("attempt")
+                else:
+                    stg.update(status="done" if t == "stage_done" else "failed")
+                    for k in ("run", "secs", "attempts"):
+                        if ev.get(k) not in (None, ""):
+                            stg[k] = ev[k]
+        elif t == "flow_waiting" and flow is not None:
+            flow["waiting"] = ev.get("i")
+        elif t in ("flow_approved", "flow_rejected") and flow is not None:
+            flow["waiting"] = None
+        elif t == "flow_done" and flow is not None:
+            flow.update(status="done", finished=ts)
+        elif t in ("flow_failed", "flow_aborted") and flow is not None:
+            flow.update(status="failed" if t == "flow_failed" else "aborted", finished=ts,
+                        error=ev.get("error") or "interrumpido", waiting=None)
+            for stg in flow["stages"]:
+                if stg["status"] == "running":
+                    stg["status"] = "aborted"
         elif t == "review_started":
             review.update(status="running", started=ts)
         elif t == "review_done":
@@ -628,6 +663,8 @@ def run_state(pdir, name):
         if mine:
             s["tokens"] = token_stats(mine)
     tokens = {"executor": token_stats(tok) if tok else None, "opus": opus or None}
+    if flow is not None and not plan["title"]:
+        plan["title"] = f"Flujo {flow.get('label') or flow.get('flow')}: {flow.get('task', '')}"[:120]
     if agent is not None:
         try:
             with open(os.path.join(logs, name + ".result.md"), encoding="utf-8") as f:
@@ -637,7 +674,7 @@ def run_state(pdir, name):
         if not plan["title"]:
             plan["title"] = f"{agent.get('label') or agent.get('agent')}: {agent.get('task', '')}"[:120]
     return {"name": name, "plan": plan, "analysis": analysis, "exec": execu, "review": review,
-            "tokens": tokens, "agent": agent, "events": len(events), "updated": run_mtime(pdir, name)}
+            "tokens": tokens, "agent": agent, "flow": flow, "events": len(events), "updated": run_mtime(pdir, name)}
 
 
 def run_mtime(pdir, name):
@@ -648,6 +685,9 @@ def run_mtime(pdir, name):
 
 def run_summary(pdir, name):
     st = run_state(pdir, name)
+    if st.get("flow"):
+        return {"name": name, "title": st["plan"]["title"] or name, "stage": "flow",
+                "status": st["flow"]["status"], "updated": st["updated"]}
     if st.get("agent"):
         return {"name": name, "title": st["plan"]["title"] or name, "stage": "agent",
                 "status": st["agent"]["status"], "updated": st["updated"]}

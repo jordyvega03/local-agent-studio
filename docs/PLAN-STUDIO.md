@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **Fases 0 a 4 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **Fases 0 a 5 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -105,10 +105,10 @@ AGENT_VERIFY="npm test"         # comando que debe pasar
   otras toolchains se añaden en `docker/executor/Dockerfile`). Los agentes claude solo leen.
   La verificación usa los `node_modules` del proyecto (volumen Linux propio: ROADMAP).
 
-### Fase 5 — Flujos multiagente (3–4 días)
+### Fase 5 — Flujos multiagente (3–4 días) ✅ 2026-10-14
 ```bash
 # flows/feature.env
-FLOW_STEPS="planner coder tester reviewer"
+FLOW_STEPS="plan exec tester review"   # hecho: etapas plan/exec/review o cualquier agente
 FLOW_APPROVE_AFTER="planner"      # pausa para revisar el plan
 FLOW_MAX_RETRIES=1                # Tester falla -> Coder reintenta una vez
 ```

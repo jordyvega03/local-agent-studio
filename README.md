@@ -13,6 +13,7 @@ ai plan mi-app "agregar login con email"  # Opus escribe mi-app/.ai/plans/…md
 ai exec mi-app                          # el modelo local lo implementa en la rama ai/…
 ai review mi-app                        # Opus revisa el diff
 ai agent tester mi-app "tests para X"   # agentes con roles: coder, tester, reviewer, docs
+ai flow feature mi-app "login con email" # flujo: plan → (apruebas) → exec → tester → review
 ai dashboard mi-app                     # panel web en vivo de los agentes
 ai studio mi-app                        # AI Studio: la interfaz React (en construcción)
 ai down                                 # apaga y libera ~14 GB de RAM
@@ -127,6 +128,23 @@ ai agent docs mi-app "documenta el endpoint /tasks en el README"
 La imagen del contenedor es la de Aider + Node 22 + pytest (`docker/executor/Dockerfile`).
 `ai up` la construye si falta; `ai build` la reconstruye.
 
+### Flujos multiagente
+
+```bash
+ai flow list
+ai flow feature mi-app "añadir login con email"     # plan → pausa → exec → tester → review
+ai flow quickfix mi-app "validar email vacío"       # coder → tester
+ai flow feature mi-app "…" --yes                    # sin pausas (aprueba solo)
+```
+
+- **feature**: Opus planifica y el flujo **se para** para que revises (o edites en el
+  Studio) el plan. Apruebas con `s` en su terminal o con **Aprobar** en el Studio; luego
+  el modelo local lo ejecuta, el Tester lo prueba y Opus revisa.
+- **Reintentos**: si falla la verificación de una etapa (tests/typecheck), el agente de
+  arreglo (Coder) recibe la salida del fallo y lo intenta otra vez (`FLOW_MAX_RETRIES`).
+- Cada etapa crea su propia sesión (visible en el Studio); la del flujo las enlaza.
+- Formato y cómo crear los tuyos: `flows/README.md`.
+
 ### Ver a los agentes trabajar (panel web)
 
 ```bash
@@ -191,7 +209,10 @@ Lo lanzado desde la web queda registrado igual que desde la terminal. Si paras e
   agente aparece en Sesión con su tarjeta (motor, tarea, lo que leyó o respondió), sus
   pasos (agente + verificación), su salida y sus tokens.
 
-Próxima fase: flujos multiagente (planner → coder → tester → reviewer) con aprobaciones.
+- **Flujos** (Fase 5): en Agentes, la lista de flujos con sus etapas, pausas y reintentos
+  ("Usar"); en Sesión, el flujo como diagrama de etapas con enlace a la sesión de cada una y
+  los botones **Aprobar / Rechazar** cuando espera (sirven también para flujos lanzados
+  desde la terminal).
 
 ### Medidor de tokens
 
@@ -229,6 +250,7 @@ ai down --all    # además cierra Docker Desktop (libera también su VM)
 | `ai studio [proy]` / `ai studio stop` / `--rebuild` | AI Studio (React, con token) / detener / recompilar |
 | `ai architect <proy>` | Aider architect: Opus + local en un solo chat (requiere `ANTHROPIC_API_KEY`) |
 | `ai agent list` / `ai agent <id> <proy> "tarea"` | Agentes con roles (`agents/*.env`) |
+| `ai flow list` / `ai flow <id> <proy> "tarea" [--yes]` | Flujos multiagente (`flows/*.env`) |
 | `ai build` | (Re)construye la imagen del ejecutor (Aider + Node + pytest) |
 | `ai models` / `ai pull X` / `ai rm X` | Gestión de modelos |
 | `ai use <modelo>` | Cambia el ejecutor en `config.env` |
@@ -247,6 +269,7 @@ agents/
 │       ├── aider.conf.yml       # config de Aider (montada solo lectura)
 │       └── model-settings.yml   # ajustes por modelo (num_ctx, edit_format)
 ├── agents/*.env                 # agentes con roles (formato en agents/README.md)
+├── flows/*.env                  # flujos multiagente (formato en flows/README.md)
 ├── prompts/planner.md           # instrucciones que recibe Opus para planificar
 ├── prompts/agents/*.md          # instrucciones de cada agente
 ├── docker/executor/Dockerfile   # imagen del ejecutor: Aider + Node + pytest

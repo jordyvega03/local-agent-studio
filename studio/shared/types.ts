@@ -85,6 +85,44 @@ export interface AgentRun {
   result?: string;         // motor claude: texto final (.ai/logs/<run>.result.md)
 }
 
+/** Una etapa de un flujo (Fase 5). run = la sesión que creó (plan, agente…). */
+export interface FlowStage {
+  i: number;
+  stage: string;           // plan | exec | review | id de agente
+  status: Status;
+  started?: string;
+  run?: string;
+  secs?: number;
+  attempts?: number;       // reintentos de arreglo usados
+}
+
+/** Una ejecución de `ai flow`. */
+export interface FlowRun {
+  flow?: string;
+  label?: string;
+  task?: string;
+  status: Status;
+  started?: string;
+  finished?: string;
+  waiting: number | null;  // etapa tras la que espera aprobación
+  approve: string[];
+  retries?: number;
+  fix?: string;
+  error?: string;
+  stages: FlowStage[];
+}
+
+/** Definición de un flujo (flows/<id>.env). */
+export interface FlowDef {
+  id: string;
+  name: string;
+  description: string;
+  steps: string[];
+  approve: string[];
+  retries: number;
+  fix: string;
+}
+
 /** Definición de un agente (agents/<id>.env + prompts/agents/<id>.md). */
 export interface AgentDef {
   id: string;
@@ -106,6 +144,7 @@ export interface RunState {
   review: Review;
   tokens: { executor: TokenStats | null; opus: OpusUsage | null };
   agent: AgentRun | null;  // solo en ejecuciones de `ai agent`
+  flow: FlowRun | null;    // solo en ejecuciones de `ai flow`
   events: number;
   updated: number;         // epoch en segundos
 }
@@ -113,7 +152,7 @@ export interface RunState {
 export interface RunSummary {
   name: string;
   title: string;
-  stage: "analysis" | "exec" | "review" | "agent";
+  stage: "analysis" | "exec" | "review" | "agent" | "flow";
   status: Status;
   updated: number;
 }
@@ -209,7 +248,7 @@ export interface TokensState {
 }
 
 // --- Trabajos lanzados desde la web (Fase 3) ------------------------------------
-export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up" | "agent";
+export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up" | "agent" | "flow";
 
 /** Lo que envía la web para lanzar una acción (lo valida server/actions.ts). */
 export interface JobRequest {
@@ -221,6 +260,8 @@ export interface JobRequest {
   interactive?: boolean;   // exec -i
   model?: string;          // use
   agent?: string;          // agent: id del agente
+  flow?: string;           // flow: id del flujo
+  autoApprove?: boolean;   // flow: --yes (aprueba las pausas solo)
 }
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";

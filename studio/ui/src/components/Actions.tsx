@@ -3,16 +3,17 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Ban, Bot, Brain, CircleCheck, CircleX, Clock, Cpu, Hammer, Loader2, MessagesSquare, Play, Power, ScanSearch,
+import { Ban, Bot, Brain, CircleCheck, Workflow, CircleX, Clock, Cpu, Hammer, Loader2, MessagesSquare, Play, Power, ScanSearch,
   SquareTerminal } from "lucide-react";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
-import type { AgentDef, JobAction, JobRequest, JobStatus, JobSummary, Project } from "../../../shared/types.ts";
-import { getAgents, getModels } from "../api.ts";
+import type { AgentDef, FlowDef, JobAction, JobRequest, JobStatus, JobSummary, Project } from "../../../shared/types.ts";
+import { getAgents, getFlows, getModels } from "../api.ts";
 import { duration } from "../format.ts";
 import { Card, cx, Empty } from "./ui.tsx";
 
 const ACTIONS: { key: JobAction; label: string; icon: ReactNode; help: string }[] = [
   { key: "plan", label: "Plan", icon: <Brain className="size-4" />, help: "Opus analiza el proyecto (solo lectura) y escribe un plan." },
+  { key: "flow", label: "Flujo", icon: <Workflow className="size-4" />, help: "Encadena etapas (plan, ejecución, agentes, revisión) con pausas para aprobar." },
   { key: "agent", label: "Agente", icon: <Bot className="size-4" />, help: "Lanza uno de tus agentes (pestaña Agentes) con una tarea." },
   { key: "exec", label: "Ejecutar", icon: <Hammer className="size-4" />, help: "El modelo local implementa un plan paso a paso en una rama ai/…" },
   { key: "review", label: "Revisar", icon: <ScanSearch className="size-4" />, help: "Opus revisa el diff de la rama del agente." },
@@ -38,7 +39,7 @@ const label = (text: string, child: ReactNode, hint?: string) => (
 
 // --- Formulario ----------------------------------------------------------------
 /** Preselección desde otra vista (p. ej. "Usar" en Agentes). nonce cambia en cada clic. */
-export interface LaunchPreset { action: JobAction; agent?: string; nonce: number }
+export interface LaunchPreset { action: JobAction; agent?: string; flow?: string; nonce: number }
 
 export function LaunchForm({ projects, project, run, onLaunch, preset }: {
   projects: Project[]; project: string; run: string;
@@ -47,6 +48,9 @@ export function LaunchForm({ projects, project, run, onLaunch, preset }: {
   const [action, setAction] = useState<JobAction>("plan");
   const [agents, setAgents] = useState<AgentDef[] | null>(null);
   const [agent, setAgent] = useState("");
+  const [flows, setFlows] = useState<FlowDef[] | null>(null);
+  const [flow, setFlow] = useState("");
+  const [autoApprove, setAutoApprove] = useState(false);
   const [proj, setProj] = useState(project);
   const [custom, setCustom] = useState("");
   const [task, setTask] = useState("");
@@ -63,7 +67,11 @@ export function LaunchForm({ projects, project, run, onLaunch, preset }: {
     if (!preset) return;
     setAction(preset.action);
     if (preset.agent) setAgent(preset.agent);
+    if (preset.flow) setFlow(preset.flow);
   }, [preset?.nonce]);
+  useEffect(() => {
+    if (action === "flow") getFlows().then((list) => { setFlows(list); setFlow((cur) => cur || list[0]?.id || ""); }).catch((e) => setError(String(e.message)));
+  }, [action]);
   useEffect(() => {
     if (action === "agent") getAgents().then((list) => { setAgents(list); setAgent((cur) => cur || list[0]?.id || ""); }).catch((e) => setError(String(e.message)));
   }, [action]);
@@ -81,8 +89,9 @@ export function LaunchForm({ projects, project, run, onLaunch, preset }: {
     setError(null);
     const req: JobRequest = { action };
     if (needsProject) req.project = target;
-    if (action === "plan" || action === "agent") req.task = task;
+    if (action === "plan" || action === "agent" || action === "flow") req.task = task;
     if (action === "agent") req.agent = agent;
+    if (action === "flow") { req.flow = flow; if (autoApprove) req.autoApprove = true; }
     if (action === "exec") {
       if (plan && proj !== "__custom") req.plan = plan;
       if (interactive) req.interactive = true;
@@ -92,7 +101,7 @@ export function LaunchForm({ projects, project, run, onLaunch, preset }: {
     setBusy(true);
     try {
       await onLaunch(req);
-      if (action === "plan" || action === "agent") setTask("");
+      if (action === "plan" || action === "agent" || action === "flow") setTask("");
       setFrom("");
     } catch (err) {
       setError((err as Error).message);
@@ -133,10 +142,22 @@ export function LaunchForm({ projects, project, run, onLaunch, preset }: {
           </select>
         ), agents?.find((a) => a.id === agent)?.description)}
 
-        {(action === "plan" || action === "agent") && label("Tarea", (
+        {action === "flow" && label("Flujo", (
+          <select className={inputCls} value={flow} onChange={(e) => setFlow(e.target.value)} disabled={!flows}>
+            {flows?.map((f) => <option key={f.id} value={f.id}>{f.name} · {f.steps.join(" → ")}</option>)}
+          </select>
+        ), flows?.find((f) => f.id === flow)?.description)}
+        {action === "flow" && (flows?.find((f) => f.id === flow)?.approve.length ?? 0) > 0 && (
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} />
+            <span>Aprobar las pausas automáticamente (--yes)</span>
+          </label>
+        )}
+
+        {(action === "plan" || action === "agent" || action === "flow") && label("Tarea", (
           <textarea className={cx(inputCls, "min-h-28 resize-y")} value={task} onChange={(e) => setTask(e.target.value)}
             placeholder='p. ej. "añadir endpoint GET /tasks con paginación"' maxLength={4000} required />
-        ), action === "agent" ? "Qué quieres que haga este agente." : "Cuanto más concreta, mejor plan.")}
+        ), action === "agent" ? "Qué quieres que haga este agente." : action === "flow" ? "La comparten todas las etapas del flujo." : "Cuanto más concreta, mejor plan.")}
 
         {action === "exec" && (
           <>

@@ -78,7 +78,7 @@ compose() {
   EXECUTOR_CPUS="$EXECUTOR_CPUS" OLLAMA_PORT="$(executor_ollama_port)" \
   GIT_NAME="$(git config --global user.name || echo ai-agent)" \
   GIT_EMAIL="$(git config --global user.email || echo ai-agent@localhost)" \
-    docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"
+    DOCKER_CLI_HINTS=false docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"   # sin anuncios de Docker en la salida
 }
 
 run_container() {  # run_container <servicio> <project_dir> <args aider...>
@@ -133,6 +133,8 @@ init_run_log() {  # init_run_log <dir> <nombre-del-plan>
   [ -f "$logdir/.gitignore" ] || echo '*' >"$logdir/.gitignore"
   EVENT_LOG="$logdir/$2.jsonl"
   register_project "$1"
+  # Dentro de un flujo (ai flow), cada etapa deja aquí el nombre de su sesión.
+  if [ -n "${STAGE_OUT:-}" ]; then echo "$2" >"$STAGE_OUT"; fi
 }
 
 ai_event() {  # ai_event <tipo> [clave=valor ...]   (nunca hace fallar al comando)
@@ -353,7 +355,19 @@ prepare_git() {
     confirm "¿Inicializar git ahora?" && { git -C "$dir" init -q && git -C "$dir" add -A && git -C "$dir" commit -qm "Estado inicial antes del agente" && ok "Repo creado"; }
     return 0
   }
-  if [ -n "$(git -C "$dir" status --porcelain -- . ':!.ai')" ]; then
+  # Lo que deja Aider (.aider* y esa línea en .gitignore) no cuenta como cambio tuyo: si no,
+  # cada etapa de un flujo volvería a preguntar.
+  local dirty extra
+  dirty="$(git -C "$dir" status --porcelain -- . ':!.ai' ':!.aider*')"
+  if [ "$dirty" = "?? .gitignore" ] || [ "$dirty" = " M .gitignore" ]; then
+    if [ "$dirty" = "?? .gitignore" ]; then
+      extra="$(grep -v '^\.aider' "$dir/.gitignore" | grep -v '^[[:space:]]*$' || true)"
+    else
+      extra="$(git -C "$dir" diff -U0 -- .gitignore | grep '^[+-]' | grep -v '^+++' | grep -v '^---' | grep -v '^+\.aider' || true)"
+    fi
+    [ -n "$extra" ] || dirty=""
+  fi
+  if [ -n "$dirty" ]; then
     warn "Hay cambios sin commitear en $(basename "$dir")."
     confirm "¿Continuar? (el agente los incluirá en sus commits)" || die "Cancelado."
   fi
@@ -616,6 +630,153 @@ $task"; then
   ok "Agente $label terminado."
 }
 
+# --- Flujos multiagente (flows/*.env) -----------------------------------------
+list_flows() {
+  local f
+  echo "${c_dim}Flujos (flows/*.env):${c_off}"
+  for f in "$AI_HOME"/flows/*.env; do
+    [ -f "$f" ] || continue
+    printf "  %-10s %-34s %s\n" "$(basename "$f" .env)" "$(agent_field "$f" FLOW_STEPS)" "$(agent_field "$f" FLOW_DESCRIPTION)"
+  done
+  echo "Uso: ai flow <nombre> <proyecto> \"tarea\" [--yes]   (--yes: aprueba las pausas solo)"
+}
+
+# Ejecuta una etapa en un subshell con `set -e` ACTIVO y deja su código en STAGE_RC.
+# (Llamarla en un `||` o un `if` desactivaría set -e dentro: un fallo no pararía la etapa.)
+run_stage() {  # run_stage <función> [args...]
+  set +e
+  ( set -e; "$@" )
+  STAGE_RC=$?
+  set -e
+}
+
+# Pausa del flujo: espera "s/n" en la terminal o el archivo de decisión que escribe el Studio.
+flow_wait_approval() {  # flow_wait_approval <i> <etapa> <archivo-decisión>
+  local i="$1" stage="$2" dec="$3" reply=""
+  rm -f "$dec"
+  if [ "$FLOW_YES" = 1 ]; then ai_event flow_approved i="$i" by=auto; return 0; fi
+  ai_event flow_waiting i="$i" stage="$stage"
+  echo
+  warn "Pausa del flujo tras '$stage'. Revisa el resultado (p. ej. edita el plan en el Studio)."
+  printf "%s" "¿Continuar el flujo? [s/n] (o Aprobar/Rechazar en el Studio) "
+  while :; do
+    if [ -f "$dec" ]; then reply="$(cat "$dec")"; rm -f "$dec"; echo "$reply (desde el Studio)"; break; fi
+    if [ -t 0 ]; then
+      if read -r -t 2 reply; then break; fi
+    else
+      sleep 2
+    fi
+  done
+  case "$reply" in
+    s|S|si|sí|SI|y|Y|approve) ai_event flow_approved i="$i"; return 0 ;;
+    *) ai_event flow_rejected i="$i"; return 1 ;;
+  esac
+}
+
+cmd_flow() {
+  local name="${1:-list}"
+  case "$name" in list|ls) list_flows; return ;; esac
+  case "$name" in ""|*[!a-z0-9-]*) die "Nombre de flujo no válido: $name" ;; esac
+  local file="$AI_HOME/flows/$name.env"
+  [ -f "$file" ] || die "No existe el flujo '$name'. Mira: ai flow list"
+  shift
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  FLOW_YES=0
+  local task="" a
+  for a in "$@"; do
+    if [ "$a" = "--yes" ]; then FLOW_YES=1; else task="${task:+$task }$a"; fi
+  done
+  [ -n "$task" ] || die "Falta la tarea. Ej: ai flow $name mi-app \"añadir login con email\""
+
+  local label steps approve retries fix
+  label="$(agent_field "$file" FLOW_NAME)"; label="${label:-$name}"
+  steps="$(agent_field "$file" FLOW_STEPS)"
+  approve="$(agent_field "$file" FLOW_APPROVE_AFTER)"
+  retries="$(agent_field "$file" FLOW_MAX_RETRIES)"; retries="${retries:-0}"
+  fix="$(agent_field "$file" FLOW_FIX_AGENT)"; fix="${fix:-coder}"
+  case "$retries" in *[!0-9]*) die "FLOW_MAX_RETRIES debe ser un número (flows/$name.env)" ;; esac
+  [ -n "$steps" ] || die "FLOW_STEPS está vacío (flows/$name.env)"
+  local st
+  for st in $steps; do
+    case "$st" in
+      plan|exec|review) ;;
+      *) case "$st" in *[!a-z0-9-]*) die "Etapa no válida: $st" ;; esac
+         [ -f "$AI_HOME/agents/$st.env" ] || die "La etapa '$st' no es plan/exec/review ni un agente de agents/." ;;
+    esac
+  done
+  [ "$retries" -eq 0 ] || [ -f "$AI_HOME/agents/$fix.env" ] || die "FLOW_FIX_AGENT '$fix' no existe en agents/."
+
+  local slug; slug="$(echo "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-30 | sed 's/-$//')"
+  local run="$(date +%Y%m%d-%H%M%S)-flow-$name-$slug"
+  mkdir -p "$dir/.ai"
+  init_run_log "$dir" "$run"
+  local flow_log="$EVENT_LOG" decision="$dir/.ai/logs/$run.decision"
+  FLOW_STATE=running
+  trap 'rm -f "$STAGE_OUT_FILE"; if [ "$FLOW_STATE" = running ]; then EVENT_LOG="$flow_log"; ai_event flow_aborted; fi' EXIT
+  STAGE_OUT_FILE="$(mktemp -t ai-flow)"
+  ai_event flow_started flow="$name" label="$label" stages="$steps" task="$task" approve="$approve" retries="$retries" fix="$fix"
+  info "Flujo ${label}: $steps"
+
+  local i=0 plan_name="" child t0 ok attempt vlog total
+  total="$(echo $steps | wc -w | tr -d ' ')"
+  for st in $steps; do
+    i=$((i + 1))
+    echo; echo "${c_blue}━━━━━━ Etapa $i/$total: $st ━━━━━━${c_off}"
+    : >"$STAGE_OUT_FILE"
+    t0="$(date +%s)"
+    ai_event stage_started i="$i" stage="$st"
+    # Cada etapa en un subshell: su die/exit/trap no corta el flujo y su registro es el suyo.
+    STAGE_OUT="$STAGE_OUT_FILE"
+    case "$st" in
+      plan)   run_stage cmd_plan "$dir" "$task" ;;
+      exec)   run_stage cmd_exec "$dir" ${plan_name:+.ai/plans/$plan_name.md} ;;
+      review) run_stage cmd_review "$dir" ;;
+      *)      run_stage cmd_agent "$st" "$dir" "$task" ;;
+    esac
+    STAGE_OUT=""
+    ok=1; [ "$STAGE_RC" = 0 ] || ok=0
+    child="$(cat "$STAGE_OUT_FILE" 2>/dev/null || true)"
+    [ "$st" = plan ] && [ -n "$child" ] && plan_name="$child"
+
+    # Reintento: si falló la verificación de la etapa, el agente de arreglo recibe el fallo.
+    attempt=0
+    while [ "$ok" = 0 ] && [ "$attempt" -lt "$retries" ] && [ -n "$child" ] && [ -f "$dir/.ai/logs/$child.step-002.log" ]; do
+      attempt=$((attempt + 1))
+      vlog="$dir/.ai/logs/$child.step-002.log"
+      warn "La verificación de '$st' falló. Reintento $attempt/$retries con el agente ${fix}…"
+      ai_event flow_retry i="$i" attempt="$attempt" agent="$fix"
+      : >"$STAGE_OUT_FILE"
+      STAGE_OUT="$STAGE_OUT_FILE"
+      run_stage cmd_agent "$fix" "$dir" "Haz que pasen las comprobaciones del proyecto sin romper lo demás. Tarea original: $task
+
+Salida de la comprobación que falló (últimas líneas):
+$(tail -n 60 "$vlog" | sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" | tr -d '\r')"
+      STAGE_OUT=""
+      [ "$STAGE_RC" = 0 ] && ok=1
+      child="$(cat "$STAGE_OUT_FILE" 2>/dev/null || true)"
+    done
+
+    if [ "$ok" = 1 ]; then
+      ai_event stage_done i="$i" stage="$st" run="$child" secs="$(( $(date +%s) - t0 ))" attempts="$attempt"
+    else
+      ai_event stage_failed i="$i" stage="$st" run="$child" secs="$(( $(date +%s) - t0 ))" attempts="$attempt"
+      ai_event flow_failed error="falló la etapa $i ($st)"
+      FLOW_STATE=failed; die "El flujo se detuvo en la etapa $i ($st)."
+    fi
+
+    case " $approve " in
+      *" $st "*)
+        if ! flow_wait_approval "$i" "$st" "$decision"; then
+          ai_event flow_failed error="rechazado tras la etapa $i ($st)"
+          FLOW_STATE=failed; die "Flujo detenido: no aprobado tras '$st'."
+        fi ;;
+    esac
+  done
+  ai_event flow_done
+  FLOW_STATE=done
+  echo; ok "Flujo $label completado ($total etapas)."
+}
+
 # --- Panel web ---------------------------------------------------------------
 dashboard_running() { [ -f "$DASH_PID_FILE" ] && kill -0 "$(cat "$DASH_PID_FILE")" 2>/dev/null; }
 
@@ -752,6 +913,8 @@ ${c_dim}Trabajo${c_off}
   ai review <proyecto>           Opus revisa el diff que hizo el agente
   ai agent list                  Agentes disponibles (agents/*.env)
   ai agent <nombre> <proy> "t"   Lanza un agente (coder, tester, reviewer, docs…)
+  ai flow list                   Flujos multiagente (flows/*.env)
+  ai flow <nombre> <proy> "t"    Ejecuta un flujo (p. ej. feature: plan→exec→tester→review)
   ai chat <proyecto>             Chat libre con el modelo local (Aider)
   ai dashboard [proyecto]        Panel web en vivo de los agentes (127.0.0.1)
   ai dashboard stop              Detiene el panel
@@ -788,6 +951,7 @@ case "$cmd" in
   _container) run_container "$@" ;;   # interno: lo usa run_logged vía script(1)
   review)    cmd_review "$@" ;;
   agent)     cmd_agent "$@" ;;
+  flow)      cmd_flow "$@" ;;
   _verify)   run_verify "$@" ;;    # interno: lo usa run_logged_verify vía script(1)
   chat)      cmd_chat "$@" ;;
   architect) cmd_architect "$@" ;;

@@ -14,10 +14,12 @@ beforeEach(() => {
   tmp = realpathSync(mkdtempSync(join(tmpdir(), "studio-actions-")));
   mkdirSync(join(tmp, "root/personal/app/.ai/plans"), { recursive: true });
   mkdirSync(join(tmp, "fuera"), { recursive: true });
+  mkdirSync(join(tmp, "home/flows"), { recursive: true });
+  writeFileSync(join(tmp, "home/flows/feature.env"), "FLOW_NAME='Feature'\nFLOW_STEPS='plan exec'\nFLOW_APPROVE_AFTER='plan'\n");
   writeFileSync(join(tmp, "root/personal/app/.ai/plans/20261014-x.md"), "# Plan: x\n");
   writeFileSync(join(tmp, "root/archivo.txt"), "no soy carpeta");
   symlinkSync(join(tmp, "fuera"), join(tmp, "root/escape"));
-  cfg = { projectsRoot: join(tmp, "root") } as Config;
+  cfg = { projectsRoot: join(tmp, "root"), aiHome: join(tmp, "home") } as Config;
   app = join(tmp, "root/personal/app");
 });
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
@@ -56,6 +58,16 @@ describe("buildAction", () => {
     const i = build({ action: "exec", project: app, interactive: true });
     expect(i.argv).toEqual(["exec", app, "-i"]);
     expect(i.interactive).toBe(true);
+  });
+
+  it("flow: argv fijo, --yes opcional; interactivo si tiene pausas", () => {
+    const f = build({ action: "flow", flow: "feature", project: "personal/app", task: "login con email" });
+    expect(f.argv).toEqual(["flow", "feature", app, "login con email"]);
+    expect(f.interactive).toBe(true);
+    const y = build({ action: "flow", flow: "feature", project: app, task: "login", autoApprove: true });
+    expect(y.argv.at(-1)).toBe("--yes");
+    expect(y.interactive).toBe(false);
+    expect(() => build({ action: "flow", flow: "../x", project: app, task: "login" })).toThrow(/no existe/);
   });
 
   it("use: solo modelos ya descargados", () => {

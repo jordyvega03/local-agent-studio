@@ -23,3 +23,7 @@ export const getAgents = () => call<import("../../shared/types.ts").AgentDef[]>(
 export const createAgent = (def: import("../../shared/types.ts").AgentDef) => call("POST", "/api/agents", def);
 export const updateAgent = (def: import("../../shared/types.ts").AgentDef) =>
   call("PUT", `/api/agents/${encodeURIComponent(def.id)}`, def);
+
+export const getFlows = () => call<import("../../shared/types.ts").FlowDef[]>("GET", "/api/flows");
+export const decideFlow = (project: string, run: string, decision: "approve" | "reject") =>
+  call<{ ok: true }>("POST", "/api/flows/decision", { project, run, decision });

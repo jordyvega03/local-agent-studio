@@ -1,6 +1,6 @@
 // Servidor del Studio. Lo arranca `ai studio` (bin/ai) con la configuración por entorno.
 // Node lo ejecuta directamente (type stripping, Node >= 22.18): no hay paso de compilación.
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
@@ -9,6 +9,7 @@ import Fastify from "fastify";
 import { loadConfig } from "./config.ts";
 import { ActionError, buildAction, resolveProject } from "./actions.ts";
 import { AgentError, listAgents, saveAgent, validateAgent } from "./agents.ts";
+import { listFlows } from "./flows.ts";
 import { Jobs } from "./jobs.ts";
 import { handleSocket } from "./live.ts";
 import { Metrics } from "./metrics.ts";
@@ -84,6 +85,27 @@ const putAgent = (mode: "create" | "update") => async (req: import("fastify").Fa
 };
 app.post("/api/agents", putAgent("create"));
 app.put("/api/agents/:id", putAgent("update"));
+
+// Flujos: listar y decidir en una pausa (Aprobar/Rechazar). La decisión es un archivo que
+// el flujo vigila (bin/ai flow_wait_approval), así sirve también para flujos de la terminal.
+app.get("/api/flows", async () => listFlows(cfg));
+app.post("/api/flows/decision", async (req, reply) => {
+  const { project, run, decision } = (req.body ?? {}) as { project?: string; run?: string; decision?: string };
+  try {
+    const dir = resolveProject(project, cfg);
+    if (!run || !RUN_NAME.test(run)) return reply.code(400).send({ error: "Sesión no válida." });
+    if (decision !== "approve" && decision !== "reject") return reply.code(400).send({ error: "Decisión no válida." });
+    const st = runState(dir, run);
+    if (!st.flow || st.flow.waiting == null) return reply.code(409).send({ error: "Ese flujo no está esperando aprobación." });
+    writeFileSync(join(dir, ".ai", "logs", `${run}.decision`), decision === "approve" ? "s" : "n");
+    appendFileSync(join(cfg.aiHome, "logs", "studio-audit.jsonl"),
+      JSON.stringify({ ts: new Date().toISOString(), event: "flow_decision", project: dir, run, decision, stage: st.flow.waiting }) + "\n");
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ActionError) return reply.code(400).send({ error: err.message });
+    throw err;
+  }
+});
 
 app.put("/api/plan", async (req, reply) => {
   const { project, run, text, mtime } = (req.body ?? {}) as { project?: string; run?: string; text?: unknown; mtime?: unknown };

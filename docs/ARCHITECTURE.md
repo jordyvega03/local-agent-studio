@@ -205,6 +205,30 @@ prompts/agents/  ┘        │
 - El Studio lista/crea/edita agentes (`server/agents.ts`): valida cada campo y escribe el
   `.env` con comillas simples y valores sin comillas, `$`, `\`, `#` ni saltos de línea.
 
+## Flujos (Fase 5)
+
+```
+ai flow feature mi-app "tarea"
+  └─ etapa 1 plan ─► subshell: cmd_plan    ─► sesión .ai/logs/<plan>.*
+     (pausa: espera "s/n" en la terminal o .ai/logs/<flujo>.decision del Studio)
+  └─ etapa 2 exec ─► subshell: cmd_exec <plan de la etapa 1>
+  └─ etapa 3 tester ► subshell: cmd_agent tester … ─► si falla su verificación:
+                      cmd_agent coder "haz que pasen las comprobaciones" + salida del fallo
+  └─ etapa 4 review ► subshell: cmd_review
+```
+
+- `cmd_flow` ejecuta cada etapa con `run_stage`: un subshell con `set -e` **activo** (en un
+  `||` o un `if` bash lo desactivaría y un fallo no pararía la etapa) y el código en
+  `STAGE_RC`. El `die`/`exit`/`trap` de la etapa no corta el flujo.
+- Cada comando escribe el nombre de su sesión en `$STAGE_OUT` (desde `init_run_log`); el
+  flujo lo registra en `stage_done/stage_failed` (`run`) y el Studio enlaza las sesiones.
+- Aprobación: `flow_wait_approval` alterna `read -t 2` (terminal) y comprobar el archivo
+  de decisión. `POST /api/flows/decision` solo lo escribe si el flujo está esperando.
+- `prepare_git` no cuenta como cambio tuyo lo que deja Aider (archivos `.aider*` y la línea
+  `.aider*` que añade a `.gitignore`); si no, cada etapa volvería a preguntar "¿Continuar?".
+- Eventos: `flow_started`, `stage_started/done/failed`, `flow_retry`, `flow_waiting`,
+  `flow_approved/rejected`, `flow_done/failed/aborted` (paridad Python/TS con tests).
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |
@@ -215,6 +239,7 @@ prompts/agents/  ┘        │
 | `.ai/logs/<plan>.review.md` | Salida de `ai review` | No |
 | `.ai/logs/<plan>.tokens.jsonl` | Peticiones del medidor de ese plan | No |
 | `.ai/logs/<run>.result.md` | Respuesta de un agente con motor claude | No |
+| `.ai/logs/<flujo>.decision` | Decisión del Studio en una pausa (se borra al leerla) | No |
 | `.ai/project.env` | `VERIFY_CMD` del proyecto (opcional, lo escribes tú) | Sí, si quieres compartirlo |
 | `.aider.chat.history.md`, `.aider.input.history`, `.aider.tags.cache.*` | Estado de Aider | No (Aider los añade a `.gitignore`) |
 
@@ -227,6 +252,7 @@ prompts/agents/  ┘        │
 | Ajustar Aider | `docker/aider/aider.conf.yml` |
 | Añadir un modelo nuevo | `ai use <modelo>` + un bloque en `docker/aider/model-settings.yml` |
 | Más endurecimiento del contenedor | `docker/compose.yml` (ancla `x-hardened`) |
+| Un flujo nuevo | `flows/<id>.env` (formato en `flows/README.md`) |
 | Un agente nuevo | Studio → Agentes, o `agents/<id>.env` + `prompts/agents/<id>.md` |
 | Otra toolchain en el contenedor (Java, Go…) | `docker/executor/Dockerfile` + subir la etiqueta de `EXECUTOR_IMAGE` |
 | Un comando nuevo | `bin/ai`: función `cmd_<nombre>` + entrada en el `case` final + `cmd_help` |

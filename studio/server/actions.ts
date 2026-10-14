@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { listAgents } from "./agents.ts";
 import type { Config } from "./config.ts";
+import { listFlows } from "./flows.ts";
 import { RUN_NAME } from "./runs.ts";
 import type { JobAction, JobRequest } from "../shared/types.ts";
 
@@ -101,6 +102,16 @@ export function buildAction(req: JobRequest, cfg: Config, installedModels: strin
       const project = resolveProject(req.project, cfg);
       const task = cleanTask(req.task);
       return { action: "agent", argv: ["agent", agent.id, project, task], label: `${agent.name}: ${short(task, 50)}`, project, interactive: false };
+    }
+    case "flow": {
+      const flow = listFlows(cfg).find((f) => f.id === req.flow);
+      if (!flow) throw new ActionError("Ese flujo no existe.");
+      const project = resolveProject(req.project, cfg);
+      const task = cleanTask(req.task);
+      const argv = ["flow", flow.id, project, task];
+      if (req.autoApprove) argv.push("--yes");
+      // Interactivo: el flujo puede pararse a pedir aprobación (también se aprueba con el botón).
+      return { action: "flow", argv, label: `Flujo ${flow.name}: ${short(task, 45)}`, project, interactive: flow.approve.length > 0 && !req.autoApprove };
     }
     case "up":
       return { action: "up", argv: ["up"], label: "Encender (ai up)", interactive: false };

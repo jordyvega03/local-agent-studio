@@ -5,7 +5,7 @@ import { JobsList, JobTerminal, LaunchForm, type JobTerminalHandle, type LaunchP
 import { AgentsView } from "./components/Agents.tsx";
 import { STATUS_LABEL } from "./format.ts";
 import { useLive } from "./live.ts";
-import { AgentRunCard, AnalysisCard, ExecutionCard, Pipeline, ReviewCard, SessionActions, SessionTokensCard } from "./components/Session.tsx";
+import { AgentRunCard, AnalysisCard, ExecutionCard, FlowCard, Pipeline, ReviewCard, SessionActions, SessionTokensCard } from "./components/Session.tsx";
 import { TokensView } from "./components/Tokens.tsx";
 import { Brand, Sidebar } from "./components/Sidebar.tsx";
 import { SystemChips } from "./components/SystemChips.tsx";
@@ -67,6 +67,7 @@ export function App() {
 
   const [preset, setPreset] = useState<LaunchPreset | null>(null);
   const useAgent = (agent: string) => { setPreset({ action: "agent", agent, nonce: Date.now() }); setView("actions"); };
+  const useFlow = (flow: string) => { setPreset({ action: "flow", flow, nonce: Date.now() }); setView("actions"); };
   const launch = async (req: JobRequest) => {
     const job = await startJob(req);
     setJobId(job.id);
@@ -151,7 +152,7 @@ export function App() {
         <main className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 p-4">
           {view === "system" && <SystemView metrics={live.metrics} history={live.history} system={live.system} />}
           {view === "tokens" && <TokensView tokens={live.tokens} />}
-          {view === "agents" && <AgentsView onUse={useAgent} />}
+          {view === "agents" && <AgentsView onUse={useAgent} onUseFlow={useFlow} />}
           {/* Acciones: oculta (no desmontada) para que la terminal conserve el trabajo */}
           <div className={cx("grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]", view !== "actions" && "hidden")}>
             <div className="flex min-w-0 flex-col gap-4">
@@ -172,7 +173,8 @@ export function App() {
           {current && current.runs.length === 0 && (
             <Welcome>Este proyecto no tiene planes todavía: <Code>ai plan {current.name} "tarea"</Code></Welcome>
           )}
-          {run && (
+          {run?.flow && <FlowCard run={run} project={sel.project} onOpenRun={(name) => select(sel.project, name)} />}
+          {run && !run.flow && (
             <>
               {!run.agent && <SessionActions run={run} project={sel.project} onAction={(req) => void launch(req).catch((e) => alertError(e))} />}
               {!run.agent && <Pipeline run={run} />}

@@ -120,6 +120,11 @@ las necesite (p. ej. `tsc --noEmit`) o deja la verificación vacía para ese age
 ### `ai up` construye una imagen la primera vez
 Es la imagen del ejecutor (Aider + Node + pytest), unos 30-60 s. `ai build` la reconstruye.
 
+### Un flujo se queda parado
+Está esperando tu aprobación (en el Studio verás Aprobar/Rechazar) o una pregunta de una
+etapa, p. ej. "Hay cambios sin commitear… ¿Continuar?". Respóndela en su terminal
+(Acciones en el Studio) o haz commit antes de lanzar el flujo.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama

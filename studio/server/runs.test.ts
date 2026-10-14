@@ -138,7 +138,7 @@ describe("paridad con lib/aiwatch.py (panel ligero)", () => {
       "import sys, json; sys.path.insert(0, sys.argv[1]); import aiwatch; print(json.dumps(aiwatch.run_state(sys.argv[2], sys.argv[3])))",
       join(import.meta.dirname, "../../lib"), dir, name], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } }));
     const ts = JSON.parse(JSON.stringify(runState(dir, name)));
-    for (const k of ["analysis", "exec", "review", "tokens", "agent", "events"]) {
+    for (const k of ["analysis", "exec", "review", "tokens", "agent", "flow", "events"]) {
       const strip = (o: Record<string, unknown>) => JSON.parse(JSON.stringify(o, (key, v) => (v === null ? undefined : v)));
       expect(strip(ts[k] ?? {}), k).toEqual(strip(py[k] ?? {}));
     }
@@ -166,5 +166,45 @@ describe("ejecuciones de agentes", () => {
     const strip = (o: unknown) => JSON.parse(JSON.stringify(o, (k, v) => (v === null ? undefined : v)));
     for (const k of ["agent", "exec"] as const) expect(strip(JSON.parse(JSON.stringify(st))[k]), k).toEqual(strip(py[k]));
     expect(py.plan.title).toBe(st.plan.title);
+  });
+});
+
+describe("ejecuciones de flujos", () => {
+  const run = "20261014-120000-flow-feature-x";
+  const flowEvents = (extra: string[]) => writeFileSync(join(dir, ".ai/logs", run + ".jsonl"), [
+    ev("flow_started", { flow: "feature", label: "Feature", stages: "plan exec tester review", task: "login", approve: "plan", retries: 1, fix: "coder" }),
+    ev("stage_started", { i: 1, stage: "plan" }), ev("stage_done", { i: 1, stage: "plan", run: "20261014-1200-login", secs: 30, attempts: 0 }),
+    ...extra,
+  ].join("\n") + "\n");
+
+  it("etapas, pausa de aprobación, reintentos y paridad con Python", () => {
+    flowEvents([ev("flow_waiting", { i: 1, stage: "plan" })]);
+    let st = runState(dir, run);
+    expect(st.flow).toMatchObject({ status: "running", waiting: 1, approve: ["plan"], retries: 1 });
+    expect(st.flow!.stages.map((s) => s.status)).toEqual(["done", "pending", "pending", "pending"]);
+    expect(st.flow!.stages[0].run).toBe("20261014-1200-login");
+    expect(st.plan.title).toBe("Flujo Feature: login");
+
+    flowEvents([ev("flow_waiting", { i: 1 }), ev("flow_approved", { i: 1 }),
+      ev("stage_started", { i: 2, stage: "exec" }), ev("stage_done", { i: 2, run: "20261014-1200-login", secs: 60 }),
+      ev("stage_started", { i: 3, stage: "tester" }), ev("flow_retry", { i: 3, attempt: 1, agent: "coder" }),
+      ev("stage_failed", { i: 3, run: "r3", attempts: 1 }), ev("flow_failed", { error: "falló la etapa 3 (tester)" })]);
+    st = runState(dir, run);
+    expect(st.flow).toMatchObject({ status: "failed", waiting: null, error: "falló la etapa 3 (tester)" });
+    expect(st.flow!.stages[2]).toMatchObject({ status: "failed", attempts: 1, run: "r3" });
+    expect(listRuns(dir).find((r) => r.name === run)).toMatchObject({ stage: "flow", status: "failed" });
+
+    const py = JSON.parse(execFileSync("python3", ["-c",
+      "import sys, json; sys.path.insert(0, sys.argv[1]); import aiwatch; print(json.dumps(aiwatch.run_state(sys.argv[2], sys.argv[3])))",
+      join(import.meta.dirname, "../../lib"), dir, run], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } }));
+    const strip = (o: unknown) => JSON.parse(JSON.stringify(o, (k, v) => (v === null ? undefined : v)));
+    expect(strip(JSON.parse(JSON.stringify(st)).flow)).toEqual(strip(py.flow));
+  });
+
+  it("interrumpido: la etapa en curso queda abortada", () => {
+    flowEvents([ev("stage_started", { i: 2, stage: "exec" }), ev("flow_aborted")]);
+    const st = runState(dir, run);
+    expect(st.flow).toMatchObject({ status: "aborted", error: "interrumpido" });
+    expect(st.flow!.stages[1].status).toBe("aborted");
   });
 });
