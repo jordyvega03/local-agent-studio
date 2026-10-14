@@ -38,6 +38,10 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-14 — **AI Studio, Fase 0** (`ai studio`): servidor Fastify + UI React con
+      token por sesión, Host/Origin, WebSocket en vivo y terminal xterm.js; misma
+      información que `ai dashboard`. Ver `PLAN-STUDIO.md` para las fases siguientes.
+
 - [x] 2026-10-14 — **Panel web `ai dashboard`** (127.0.0.1, solo lectura): pipeline
       Análisis → Ejecución → Revisión, lecturas de Opus en vivo, pasos con estado, duración
       y commits, salida de Aider en vivo, revisión y estado del sistema. `ai plan` muestra

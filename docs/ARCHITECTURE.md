@@ -101,6 +101,29 @@ navegador ◄── http://127.0.0.1:DASHBOARD_PORT ◄── lib/aiwatch.py ser
 - **Página:** `dashboard/index.html`, JavaScript sin dependencias. Consulta `/api/run` y
   `/api/log` cada 1,5 s y `/api/projects` y `/api/system` cada 5 s.
 
+## AI Studio (`ai studio`)
+
+```
+navegador (React) ◄──WebSocket /ws──► studio/server (Fastify, Node) ──lee──► proyecto/.ai/
+      ▲                                    │                                 run/projects
+      └── /auth?token= (lo abre bin/ai)    └──► ollama /api/ps, docker ps, memory_pressure
+```
+
+- **`studio/server/`** (TypeScript que Node ejecuta sin compilar, Node >= 22.18):
+  `main.ts` arranca Fastify en `127.0.0.1:STUDIO_PORT`; `security.ts` token, cookie,
+  Host y Origin; `runs.ts` lee planes y eventos (**misma semántica que `run_state()` de
+  `lib/aiwatch.py`**, fijada por `runs.test.ts`); `live.ts` el canal `/ws`;
+  `system.ts` el estado del sistema; `config.ts` lo que pasa `bin/ai` por entorno.
+- **`studio/shared/types.ts`**: tipos de los datos y del protocolo WebSocket, comunes a
+  servidor y UI.
+- **`studio/ui/`** (React + Vite + Tailwind): `npm run build` deja `ui/dist`, que sirve el
+  servidor. `bin/ai` recompila si hay fuentes más nuevas que el build.
+- **Protocolo `/ws`:** el cliente manda `{type:"subscribe", project, run, step}`; el
+  servidor empuja `run` (si cambió, cada 1 s), `log` (bytes nuevos de la terminal grabada
+  en base64, cada 1 s), `projects` (5 s) y `system` (3 s). La terminal se pinta con
+  xterm.js, que interpreta los colores y redibujados de Aider tal cual.
+- `ai dashboard` sigue existiendo como panel ligero sin dependencias.
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |

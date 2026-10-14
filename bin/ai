@@ -19,6 +19,8 @@ RUN_DIR="$AI_HOME/run"
 LOG_DIR="$AI_HOME/logs"
 PID_FILE="$RUN_DIR/ollama.pid"
 DASH_PID_FILE="$RUN_DIR/dashboard.pid"
+STUDIO_PID_FILE="$RUN_DIR/studio.pid"
+STUDIO_TOKEN_FILE="$RUN_DIR/studio.token"   # lo crea el servidor en cada arranque
 PROJECTS_FILE="$RUN_DIR/projects"            # proyectos que puede mostrar el panel
 AIWATCH="$AI_HOME/lib/aiwatch.py"
 mkdir -p "$RUN_DIR" "$LOG_DIR"
@@ -196,6 +198,7 @@ cmd_down() {
   unload_models
   stop_ollama
   stop_dashboard
+  stop_studio
   if [ "$quit_docker" = 1 ]; then
     info "Cerrando Docker Desktop (libera la RAM de su VM)…"
     osascript -e 'quit app "Docker"' >/dev/null 2>&1 || true
@@ -225,6 +228,7 @@ cmd_status() {
   echo "  planificador: $PLANNER_MODEL (Claude Code)"
   echo "  contexto:     $OLLAMA_CONTEXT_LENGTH tokens · keep_alive $OLLAMA_KEEP_ALIVE"
   if dashboard_running; then echo "  panel:        http://127.0.0.1:$DASHBOARD_PORT/"; else echo "  panel:        detenido (ai dashboard)"; fi
+  if studio_running; then echo "  studio:       http://127.0.0.1:$STUDIO_PORT/ (ai studio para abrirlo)"; else echo "  studio:       detenido (ai studio)"; fi
   echo "${c_dim}── Memoria del Mac ────────────────────${c_off}"
   memory_pressure 2>/dev/null | grep -i "free percentage" | sed 's/^/  /' || true
 }
@@ -448,6 +452,75 @@ cmd_dashboard() {
   open "$url"
 }
 
+# --- AI Studio (studio/, docs/PLAN-STUDIO.md) --------------------------------
+studio_running() { [ -f "$STUDIO_PID_FILE" ] && kill -0 "$(cat "$STUDIO_PID_FILE")" 2>/dev/null; }
+
+stop_studio() {
+  if studio_running; then kill "$(cat "$STUDIO_PID_FILE")" && ok "Studio detenido"; fi
+  rm -f "$STUDIO_PID_FILE" "$STUDIO_TOKEN_FILE"
+}
+
+node_recent_enough() {  # Node >= STUDIO_MIN_NODE (ejecuta TypeScript sin compilar)
+  node -e 'const v=s=>s.split(".").map(Number),[a,b]=v(process.versions.node),[x,y]=v(process.argv[1]);process.exit(a>x||(a===x&&b>=y)?0:1)' "$STUDIO_MIN_NODE"
+}
+
+# Compila la UI si falta o si hay fuentes más nuevas que el build.
+build_studio_ui() {  # build_studio_ui <studio_dir> <forzar 0|1>
+  local sdir="$1" stamp="$1/ui/dist/index.html"
+  if [ "$2" = 1 ] || [ ! -f "$stamp" ] ||
+     [ -n "$(find "$sdir/ui/src" "$sdir/ui/index.html" "$sdir/shared" -newer "$stamp" -type f 2>/dev/null | head -1)" ]; then
+    info "Compilando la interfaz del Studio…"
+    (cd "$sdir" && npm run --silent build >/dev/null) || die "Falló la compilación. Prueba: cd $sdir && npm run build"
+  fi
+}
+
+cmd_studio() {
+  local rebuild=0 project=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      stop) stop_studio; return ;;
+      --rebuild) rebuild=1 ;;
+      *) project="$1" ;;
+    esac; shift
+  done
+  command -v node >/dev/null || die "ai studio necesita Node.js >= $STUDIO_MIN_NODE (brew install node)."
+  node_recent_enough || die "Node $(node -v) es antiguo: ai studio necesita >= $STUDIO_MIN_NODE."
+  local sdir="$AI_HOME/studio"
+  if [ ! -d "$sdir/node_modules" ]; then
+    info "Instalando dependencias del Studio (npm ci, versiones fijadas)…"
+    (cd "$sdir" && npm ci --no-audit --no-fund) || die "Falló npm ci en $sdir"
+  fi
+  build_studio_ui "$sdir" "$rebuild"
+  [ "$rebuild" = 1 ] && studio_running && stop_studio   # el servidor también se recarga
+
+  local query=""
+  if [ -n "$project" ]; then
+    local dir; dir="$(resolve_project "$project")"
+    register_project "$dir"
+    query="&project=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$dir")"
+  fi
+
+  if ! studio_running; then
+    info "Iniciando AI Studio en http://127.0.0.1:$STUDIO_PORT (solo localhost)…"
+    rm -f "$STUDIO_TOKEN_FILE"
+    AI_HOME="$AI_HOME" STUDIO_PORT="$STUDIO_PORT" EXECUTOR_MODEL="$EXECUTOR_MODEL" PLANNER_MODEL="$PLANNER_MODEL" \
+    OLLAMA_URL="$OLLAMA_URL" COMPOSE_PROJECT="$COMPOSE_PROJECT" \
+      nohup node "$sdir/server/main.ts" >>"$LOG_DIR/studio.log" 2>&1 &
+    echo $! >"$STUDIO_PID_FILE"
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      [ -s "$STUDIO_TOKEN_FILE" ] && curl -s -o /dev/null -m 1 "http://127.0.0.1:$STUDIO_PORT/auth" && break
+      studio_running || { rm -f "$STUDIO_PID_FILE"; die "El Studio no arrancó (¿puerto $STUDIO_PORT ocupado?). Revisa $LOG_DIR/studio.log"; }
+      sleep 0.5
+    done
+  fi
+  [ -s "$STUDIO_TOKEN_FILE" ] || die "El Studio no generó su token. Revisa $LOG_DIR/studio.log"
+  ok "AI Studio: http://127.0.0.1:$STUDIO_PORT/"
+  echo "   Abriendo con un token de sesión nuevo. Detenlo con: ai studio stop (o ai down)"
+  # El token va solo en este enlace local; el servidor lo cambia por una cookie y lo quita de la URL.
+  open "http://127.0.0.1:$STUDIO_PORT/auth?token=$(cat "$STUDIO_TOKEN_FILE")$query"
+}
+
 cmd_use() {
   local m="${1:-}"
   [ -n "$m" ] || die "Uso: ai use <modelo>   (ej: ai use qwen3-coder:30b)"
@@ -477,6 +550,8 @@ ${c_dim}Trabajo${c_off}
   ai chat <proyecto>             Chat libre con el modelo local (Aider)
   ai dashboard [proyecto]        Panel web en vivo de los agentes (127.0.0.1)
   ai dashboard stop              Detiene el panel
+  ai studio [proyecto]           AI Studio: interfaz React (127.0.0.1, con token)
+  ai studio stop | --rebuild     Detiene el Studio | recompila la UI y lo reinicia
   ai architect <proyecto>        Aider: Opus arquitecto + local editor (API key)
 
 ${c_dim}Modelos${c_off}
@@ -503,6 +578,7 @@ case "$cmd" in
   plan)      cmd_plan "$@" ;;
   exec|run)  cmd_exec "$@" ;;
   dashboard|ui) cmd_dashboard "$@" ;;
+  studio)    cmd_studio "$@" ;;
   _container) run_container "$@" ;;   # interno: lo usa run_logged vía script(1)
   review)    cmd_review "$@" ;;
   chat)      cmd_chat "$@" ;;

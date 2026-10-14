@@ -63,6 +63,17 @@ cat ~/Documents/agents/logs/dashboard.log
 Si el proceso murió sin poder registrarlo (p. ej. cerraste la terminal), el último
 evento queda abierto. Relanza o reanuda: `ai exec mi-app --from <N>`.
 
+### AI Studio: "Sesión no válida"
+El token cambia en cada arranque. Ábrelo siempre con `ai studio` (no con un marcador).
+
+### AI Studio no arranca o la UI no cambia
+```bash
+cat ~/Documents/agents/logs/studio.log
+node -v                      # >= 22.18
+ai studio --rebuild          # recompila la UI y reinicia el servidor
+```
+Si el puerto está ocupado, cambia `STUDIO_PORT` en `config.env`.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama

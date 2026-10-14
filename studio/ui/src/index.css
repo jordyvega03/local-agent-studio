@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/* Tokens de color: claro por defecto, oscuro según el sistema. Las clases de Tailwind
+   (bg-panel, text-muted, border-line…) apuntan a estas variables. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-run: var(--run);
+  --color-run-bg: var(--run-bg);
+  --color-fail: var(--fail);
+  --color-fail-bg: var(--fail-bg);
+  --color-idle: var(--idle);
+  --color-idle-bg: var(--idle-bg);
+  --color-term: var(--term);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #f5f6f8; --panel: #ffffff; --panel-2: #eef0f3; --line: #dfe2e7;
+  --fg: #1c2128; --muted: #5f6873; --accent: #3b6fe0;
+  --ok: #1a7f37; --ok-bg: #dcf5e3; --run: #9a6700; --run-bg: #fff2cc;
+  --fail: #cf222e; --fail-bg: #ffe6e4; --idle: #8c959f; --idle-bg: #e8ebef;
+  --term: #0f1419;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14; --panel: #12171e; --panel-2: #19202a; --line: #262e39;
+    --fg: #e6edf3; --muted: #8b95a1; --accent: #6e9bf5;
+    --ok: #3fb950; --ok-bg: #11251a; --run: #d29922; --run-bg: #2a2010;
+    --fail: #f85149; --fail-bg: #2c1416; --idle: #6e7681; --idle-bg: #1f252e;
+    --term: #05080c;
+  }
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes studio-pulse { 50% { box-shadow: 0 0 0 6px var(--run-bg); } }
+.pulse { animation: studio-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+/* xterm.js ocupa todo su contenedor */
+.xterm { height: 100%; padding: 10px 12px; }
+.xterm-viewport { background: transparent !important; }

@@ -1,0 +1,19 @@
+{
+  // Solo comprobación de tipos: el servidor lo ejecuta Node directamente (type stripping)
+  // y la UI la compila Vite. Por eso noEmit y solo sintaxis "borrable" (sin enums).
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["node", "vite/client"]
+  },
+  "include": ["server", "ui/src", "ui/vite.config.ts", "shared"]
+}

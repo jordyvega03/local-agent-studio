@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **propuesto** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **Fase 0 hecha** (2026-10-14). Seguimiento en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -41,11 +41,12 @@ queda como panel ligero de respaldo.
 | PTY | `node-pty` | `ai exec` se comporta igual que en una terminal |
 | Métricas | `systeminformation`, `docker stats`, `ioreg` (GPU sin sudo), `ollama /api/ps` | Sin privilegios |
 
-Pendiente de confirmar: backend Node/TS (recomendado) o Python/FastAPI.
+Decidido (2026-10-14): backend Node/TS. shadcn/ui se incorporará en la Fase 3 (formularios);
+la Fase 0 usa componentes propios con Tailwind en el mismo estilo.
 
 ## Fases
 
-### Fase 0 — Base del Studio (1–2 días)
+### Fase 0 — Base del Studio (1–2 días) ✅ 2026-10-14
 - `studio/server` (Fastify) y `studio/ui` (React).
 - `ai studio [proyecto]`: arranca en `127.0.0.1:STUDIO_PORT` y abre el navegador.
 - Seguridad desde el día 1 (ver abajo).

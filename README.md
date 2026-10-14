@@ -13,6 +13,7 @@ ai plan mi-app "agregar login con email"  # Opus escribe mi-app/.ai/plans/…md
 ai exec mi-app                          # el modelo local lo implementa en la rama ai/…
 ai review mi-app                        # Opus revisa el diff
 ai dashboard mi-app                     # panel web en vivo de los agentes
+ai studio mi-app                        # AI Studio: la interfaz React (en construcción)
 ai down                                 # apaga y libera ~14 GB de RAM
 ```
 
@@ -27,6 +28,7 @@ ai down                                 # apaga y libera ~14 GB de RAM
 | Claude Code | Planificador Opus (usa tu login) | ya estaba |
 | Imagen `paulgauthier/aider` | Ejecutor dentro del contenedor | `ai up` la descarga |
 | `python3` (el de macOS) | Vista en vivo de `ai plan` y `ai dashboard` | viene con las Command Line Tools |
+| Node.js >= 22.18 | AI Studio (`ai studio`) | `brew install node` |
 | Modelo `gpt-oss:20b` | Cerebro del ejecutor (~14 GB) | `ai up` lo descarga |
 
 El comando `ai` está enlazado en `~/.local/bin/ai` → `bin/ai`. Para reinstalarlo:
@@ -118,6 +120,26 @@ se cambia con `DASHBOARD_PORT` en `config.env`.
 Los datos salen de `mi-app/.ai/logs/` (ver `docs/ARCHITECTURE.md`). `ai exec -i` y
 `ai chat` no se graban: ahí ya estás tú en la terminal.
 
+### AI Studio (interfaz React, en construcción)
+
+```bash
+ai studio mi-app        # instala/compila si hace falta y abre http://127.0.0.1:8766
+ai studio stop          # lo detiene (ai down también)
+ai studio --rebuild     # recompila la UI y reinicia el servidor
+```
+
+La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). **Fase 0 hecha:**
+lo mismo que `ai dashboard` (sesiones en la barra lateral, etapas, lecturas de Opus, pasos,
+revisión, sistema) con datos empujados por WebSocket y la salida de Aider en una terminal
+real (xterm.js, con colores). Próximas fases: métricas, tokens, comandos desde la web y
+agentes con roles.
+
+- Necesita **Node >= 22.18** (`STUDIO_MIN_NODE`). La primera vez hace `npm ci` (versiones
+  fijadas en `studio/package-lock.json`) y compila la UI.
+- Cada arranque genera un **token nuevo**; `ai studio` abre el navegador ya autenticado.
+  Si abres `http://127.0.0.1:8766` a mano verás "Sesión no válida": usa `ai studio`.
+- Desarrollo de la UI con recarga en caliente: ver `studio/README.md`.
+
 ### 5. Apagar y liberar memoria
 
 ```bash
@@ -137,6 +159,7 @@ ai down --all    # además cierra Docker Desktop (libera también su VM)
 | `ai review <proy>` | Opus revisa el diff |
 | `ai chat <proy> [args aider]` | Chat libre con Aider + modelo local |
 | `ai dashboard [proy]` / `ai dashboard stop` | Panel web en vivo (127.0.0.1) / detenerlo |
+| `ai studio [proy]` / `ai studio stop` / `--rebuild` | AI Studio (React, con token) / detener / recompilar |
 | `ai architect <proy>` | Aider architect: Opus + local en un solo chat (requiere `ANTHROPIC_API_KEY`) |
 | `ai models` / `ai pull X` / `ai rm X` | Gestión de modelos |
 | `ai use <modelo>` | Cambia el ejecutor en `config.env` |
@@ -157,6 +180,7 @@ agents/
 ├── prompts/planner.md           # instrucciones que recibe Opus para planificar
 ├── lib/aiwatch.py               # eventos, análisis en vivo y servidor del panel
 ├── dashboard/index.html         # panel web (sin dependencias externas)
+├── studio/                      # AI Studio: server/ (Fastify), ui/ (React), shared/ (tipos)
 ├── docs/
 │   ├── ARCHITECTURE.md          # cómo funciona por dentro
 │   ├── SECURITY.md              # modelo de amenazas y medidas

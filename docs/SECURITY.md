@@ -11,6 +11,8 @@
 | Exponer el modelo a la red | Que alguien en el WiFi use tu Ollama | Ollama escucha solo en `127.0.0.1` |
 | Prompt injection desde el repo | Un README malicioso que da órdenes al agente | El planificador es de solo lectura. El ejecutor está aislado. Revisas el plan y el diff antes de mergear. |
 | Otra web o alguien de la red lee el panel | Una página maliciosa que consulta `127.0.0.1:8765` | El panel escucha solo en `127.0.0.1`, rechaza cualquier `Host` que no sea `127.0.0.1`/`localhost` (DNS rebinding), es de solo lectura (solo `GET`), solo sirve proyectos registrados en `run/projects` y nombres de plan sin rutas. Cabeceras CSP estrictas y sin CDNs. |
+| Otra web o app local usa el Studio | Una página en `localhost:3000` abre `ws://127.0.0.1:8766/ws` con tu cookie | Solo `127.0.0.1`; token aleatorio por arranque (`run/studio.token`, permisos 600) cambiado por cookie `HttpOnly` + `SameSite=Strict`; **Origin** obligatorio y permitido en WebSocket y en todo lo que no sea `GET` (SameSite no distingue puertos de localhost); **Host** permitido; CSP sin scripts en línea. |
+| Dependencias npm comprometidas | Un paquete del Studio con código malicioso | Versiones exactas + `package-lock.json` y `npm ci`; instaladas con `--before` (sin versiones recién publicadas); npm 11 bloquea los scripts de instalación por defecto. Solo afecta al Studio, no a `bin/ai` ni al contenedor. |
 | Telemetría y fugas | Envío de datos a terceros | `analytics-disable`, `check-update: false`, `LITELLM_LOCAL_MODEL_COST_MAP`. El modelo es 100% local. |
 
 ## Qué ve cada componente
@@ -21,6 +23,7 @@
 | Ollama | Sus modelos en `~/.ollama` | Solo localhost | Ninguna |
 | Contenedor `executor` | `/app` = proyecto (lectura y escritura), `/config` (solo lectura) | Salida a internet + host | **Ninguna** |
 | Contenedor `architect` | Igual que `executor` | Igual | Solo `ANTHROPIC_API_KEY` |
+| AI Studio (`ai studio`) | Igual que el panel; en la Fase 3 lanzará comandos de `bin/ai` (lista cerrada) | Solo escucha en `127.0.0.1` | Ninguna (token propio de sesión) |
 | Panel (`ai dashboard`) | Lee `.ai/` de los proyectos registrados, `ollama ps`, `docker ps`, `memory_pressure` | Solo escucha en `127.0.0.1` | Ninguna |
 
 ## Limitaciones conocidas (honestas)
