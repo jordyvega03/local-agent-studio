@@ -1,0 +1,10 @@
+logs/
+run/
+.DS_Store
+
+# Python
+__pycache__/
+
+# Futuro studio/ (Node)
+node_modules/
+dist/

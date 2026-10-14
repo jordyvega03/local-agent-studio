@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de agentes</title>
+<!-- Panel de `ai dashboard`. Lo sirve lib/aiwatch.py en 127.0.0.1; sin CDNs ni dependencias. -->
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #e1e4e8;
+  --text: #1c2128; --muted: #636c76; --accent: #3b6fe0;
+  --ok: #1a7f37; --ok-bg: #dafbe1; --run: #9a6700; --run-bg: #fff4d1;
+  --fail: #cf222e; --fail-bg: #ffebe9; --idle: #8c959f; --idle-bg: #eaeef2;
+  --term-bg: #0f1419; --term-text: #d6dde6;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1c222b; --border: #30363d;
+    --text: #e6edf3; --muted: #8d96a0; --accent: #6e9bf5;
+    --ok: #3fb950; --ok-bg: #12261a; --run: #d29922; --run-bg: #2b2111;
+    --fail: #f85149; --fail-bg: #2d1416; --idle: #6e7681; --idle-bg: #21262d;
+    --term-bg: #010409; --term-text: #c9d1d9;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161b22; --panel-2: #1c222b; --border: #30363d;
+  --text: #e6edf3; --muted: #8d96a0; --accent: #6e9bf5;
+  --ok: #3fb950; --ok-bg: #12261a; --run: #d29922; --run-bg: #2b2111;
+  --fail: #f85149; --fail-bg: #2d1416; --idle: #6e7681; --idle-bg: #21262d;
+  --term-bg: #010409; --term-text: #c9d1d9;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--border);
+  padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
+.live { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+.live.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+select { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+.selectors { display: flex; gap: 8px; flex-wrap: wrap; flex: 1 1 360px; min-width: 0; }
+.selectors select { flex: 1 1 160px; min-width: 0; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2);
+  border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.chip b { color: var(--text); font-weight: 600; }
+.chip.warn b { color: var(--run); } .chip.bad b { color: var(--fail); }
+main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+
+/* Pipeline */
+.pipeline { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 8px; margin-bottom: 16px; }
+.node { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  display: flex; gap: 10px; align-items: center; min-width: 0; }
+.node .ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 16px;
+  flex: none; background: var(--idle-bg); color: var(--idle); }
+.node .meta { min-width: 0; }
+.node .name { font-weight: 600; }
+.node .sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node.running { border-color: var(--run); } .node.running .ico { background: var(--run-bg); color: var(--run); }
+.node.done .ico { background: var(--ok-bg); color: var(--ok); }
+.node.failed, .node.aborted { border-color: var(--fail); }
+.node.failed .ico, .node.aborted .ico { background: var(--fail-bg); color: var(--fail); }
+.arrow { color: var(--muted); font-size: 18px; }
+.node.running .ico { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px var(--run-bg); } }
+@media (prefers-reduced-motion: reduce) { .node.running .ico { animation: none; } }
+
+/* Layout */
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.card > h2 { font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.card > h2 .t { display: flex; align-items: center; gap: 8px; }
+.body { padding: 12px 14px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.pill { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--idle-bg); color: var(--idle); }
+.pill.running { background: var(--run-bg); color: var(--run); }
+.pill.done { background: var(--ok-bg); color: var(--ok); }
+.pill.failed, .pill.aborted { background: var(--fail-bg); color: var(--fail); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 12px; margin-bottom: 10px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Timeline del análisis */
+.timeline { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.timeline li { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px; padding: 4px 0;
+  border-bottom: 1px dashed var(--border); font-size: 12px; align-items: baseline; }
+.timeline li:last-child { border-bottom: 0; }
+.timeline .tgt { font-family: var(--mono); overflow-wrap: anywhere; }
+.timeline .note { color: var(--muted); font-style: italic; }
+
+/* Pasos */
+.progress { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin-bottom: 12px; }
+.progress > div { height: 100%; background: var(--ok); transition: width .4s; }
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; padding: 8px; border-radius: 8px;
+  cursor: pointer; align-items: start; }
+.steps li:hover { background: var(--panel-2); }
+.steps li.sel { background: var(--panel-2); outline: 1px solid var(--accent); }
+.steps .st { font-size: 15px; line-height: 1.2; text-align: center; }
+.steps .st.running { color: var(--run); } .steps .st.done { color: var(--ok); }
+.steps .st.failed, .steps .st.aborted { color: var(--fail); } .steps .st.pending { color: var(--idle); }
+.steps .ttl { font-weight: 500; }
+.steps .files, .steps .commits { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.steps .dur { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+/* Terminal */
+pre.term { margin: 0; background: var(--term-bg); color: var(--term-text); font: 12px/1.45 var(--mono);
+  padding: 12px 14px; height: 440px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  border-radius: 0 0 10px 10px; }
+pre.doc { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 420px; overflow: auto; background: var(--panel-2); padding: 12px; border-radius: 8px; }
+button.link { font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 0; }
+.empty { text-align: center; padding: 48px 16px; color: var(--muted); }
+.empty code, .body code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.error { color: var(--fail); font-size: 12px; overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .pipeline { grid-template-columns: minmax(0, 1fr); }
+  .arrow { transform: rotate(90deg); justify-self: center; }
+  pre.term { height: 320px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="live" id="live" title="Conexión con ai dashboard"></span> Agentes</h1>
+  <div class="selectors">
+    <select id="project" aria-label="Proyecto"></select>
+    <select id="run" aria-label="Plan"></select>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+<main id="main"><div class="empty">Cargando…</div></main>
+
+<script>
+"use strict";
+const REFRESH_MS = 1500;   // estado del plan y salida del paso
+const SLOW_MS = 5000;      // lista de proyectos y estado del sistema
+
+const $ = (s) => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const state = { project: params.get("project") || "", run: params.get("run") || "", step: null,
+                projects: [], data: null, system: null, showPlan: false, failures: 0 };
+
+const STATUS = { pending: "pendiente", running: "en curso", done: "hecho", failed: "falló", aborted: "interrumpido" };
+const STEP_ICON = { pending: "○", running: "◐", done: "✓", failed: "✗", aborted: "■" };
+const TOOL_ICON = { Read: "📖", Glob: "🗂", Grep: "🔎" };
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
+  return n;
+}
+const pill = (s) => el("span", { class: "pill " + s }, STATUS[s] || s);
+
+function dur(secs) {
+  if (secs == null || isNaN(secs)) return "";
+  secs = Math.max(0, Math.round(secs));
+  if (secs < 60) return secs + " s";
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return m < 60 ? `${m} min ${s} s` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+const since = (iso) => iso ? (Date.now() - new Date(iso).getTime()) / 1000 : null;
+function ago(ts) {
+  if (!ts) return "";
+  const s = (Date.now() / 1000) - ts;
+  if (s < 60) return "hace un momento";
+  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
+  return new Date(ts * 1000).toLocaleDateString();
+}
+const clock = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+
+async function api(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+
+function saveUrl() {
+  const p = new URLSearchParams();
+  if (state.project) p.set("project", state.project);
+  if (state.run) p.set("run", state.run);
+  history.replaceState(null, "", "?" + p.toString());
+}
+
+// --- Cabecera ---------------------------------------------------------------
+function renderSelectors() {
+  const ps = $("#project"), rs = $("#run");
+  ps.replaceChildren(...state.projects.map((p) => el("option", { value: p.dir, selected: p.dir === state.project }, p.name)));
+  const proj = state.projects.find((p) => p.dir === state.project);
+  const runs = proj ? proj.runs : [];
+  rs.replaceChildren(...(runs.length ? runs.map((r) =>
+    el("option", { value: r.name, selected: r.name === state.run },
+      `${r.title} · ${STATUS[r.status] || r.status} · ${ago(r.updated)}`))
+    : [el("option", { value: "" }, "sin planes")]));
+}
+
+function renderChips() {
+  const s = state.system, box = $("#chips");
+  if (!s) return;
+  const chips = [];
+  const m = s.models.find((x) => x.name === s.executor || x.name === s.executor + ":latest") || s.models[0];
+  if (s.ollama !== "up") chips.push(el("span", { class: "chip bad" }, "Ollama ", el("b", {}, "detenido")));
+  else if (!m) chips.push(el("span", { class: "chip" }, s.executor + " ", el("b", {}, "no cargado")));
+  else chips.push(el("span", { class: "chip" + (m.gpu < 100 ? " warn" : "") }, m.name + " ",
+    el("b", {}, `${m.gpu}% GPU · ${(m.size / 1e9).toFixed(1)} GB`)));
+  if (s.mem_free != null) chips.push(el("span", { class: "chip" + (s.mem_free < 15 ? " bad" : s.mem_free < 25 ? " warn" : "") },
+    "RAM libre ", el("b", {}, s.mem_free + "%")));
+  chips.push(s.docker !== "up" ? el("span", { class: "chip" }, "Docker ", el("b", {}, "detenido"))
+    : el("span", { class: "chip" }, "Contenedores ", el("b", {}, String(s.containers.length))));
+  box.replaceChildren(...chips);
+}
+
+// --- Contenido --------------------------------------------------------------
+function node(name, icon, st, sub) {
+  return el("div", { class: "node " + st },
+    el("div", { class: "ico", "aria-hidden": "true" }, icon),
+    el("div", { class: "meta" }, el("div", { class: "name" }, name, " ", pill(st)), el("div", { class: "sub" }, sub)));
+}
+
+function renderPipeline(d) {
+  const a = d.analysis, x = d.exec, r = d.review;
+  const done = x.steps.filter((s) => s.status === "done").length;
+  const aSub = a.status === "running" ? `${a.tools.length} lecturas…`
+    : a.tools.length ? `${a.tools.length} lecturas · ${dur((a.duration_ms || 0) / 1000)}` : (a.model ? "Opus" : "plan escrito");
+  const xSub = x.current ? `paso ${x.current} de ${x.steps.length}` : x.steps.length ? `${done}/${x.steps.length} pasos` : "sin pasos";
+  return el("div", { class: "pipeline" },
+    node("Análisis", "🧠", a.status, (a.model ? a.model + " · " : "") + aSub),
+    el("div", { class: "arrow", "aria-hidden": "true" }, "→"),
+    node("Ejecución", "⚙", x.status, (x.model ? x.model + " · " : "") + xSub),
+    el("div", { class: "arrow", "aria-hidden": "true" }, "→"),
+    node("Revisión", "🔍", r.status, r.status === "pending" ? "ai review" : "Opus"));
+}
+
+function renderAnalysis(d) {
+  const a = d.analysis;
+  const items = [
+    ...a.tools.map((t) => ({ ts: t.ts, li: el("li", {}, el("span", {}, TOOL_ICON[t.tool] || "🔧"),
+      el("span", { class: "tgt" }, el("span", { class: "muted" }, t.tool + " "), t.target), el("span", { class: "muted" }, clock(t.ts))) })),
+    ...a.notes.map((n) => ({ ts: n.ts, li: el("li", {}, el("span", {}, "💬"), el("span", { class: "note" }, n.text),
+      el("span", { class: "muted" }, clock(n.ts))) })),
+  ].sort((p, q) => p.ts < q.ts ? -1 : 1).map((i) => i.li);
+  const list = el("ul", { class: "timeline", id: "timeline" }, items);
+  return el("section", { class: "card" },
+    el("h2", {}, el("span", { class: "t" }, "🧠 Análisis (Opus)", pill(a.status)),
+      d.plan.text ? el("button", { class: "link", onclick: () => { state.showPlan = !state.showPlan; render(); } },
+        state.showPlan ? "ocultar plan" : "ver plan") : null),
+    el("div", { class: "body" },
+      el("dl", { class: "kv" },
+        a.task ? [el("dt", {}, "Tarea"), el("dd", {}, a.task)] : null,
+        a.started ? [el("dt", {}, "Inicio"), el("dd", {}, new Date(a.started).toLocaleString())] : null,
+        a.status === "running" ? [el("dt", {}, "Tiempo"), el("dd", {}, dur(since(a.started)))] : null,
+        a.duration_ms ? [el("dt", {}, "Duración"), el("dd", {}, dur(a.duration_ms / 1000) + (a.turns ? ` · ${a.turns} turnos` : ""))] : null),
+      a.error ? el("p", { class: "error" }, a.error) : null,
+      state.showPlan ? el("pre", { class: "doc" }, d.plan.text) : null,
+      items.length ? list : el("p", { class: "muted small" },
+        a.status === "done" ? "Plan creado antes de que existiera el registro: no hay detalle de lecturas." : "Sin actividad todavía.")));
+}
+
+function renderReview(d) {
+  const r = d.review;
+  return el("section", { class: "card" },
+    el("h2", {}, el("span", { class: "t" }, "🔍 Revisión (Opus)", pill(r.status))),
+    el("div", { class: "body" }, r.text ? el("pre", { class: "doc" }, r.text)
+      : el("p", { class: "muted small" }, r.status === "running" ? "Opus está revisando el diff…" : "Ejecuta ", r.status === "running" ? null : el("code", {}, "ai review <proyecto>"))));
+}
+
+function stepDuration(s) {
+  if (s.secs != null) return dur(s.secs);
+  if (s.status === "running") return dur(since(s.started));
+  return "";
+}
+
+function renderExec(d) {
+  const x = d.exec, total = x.steps.length;
+  const done = x.steps.filter((s) => s.status === "done").length;
+  const list = el("ul", { class: "steps" }, x.steps.map((s) => el("li", {
+      class: s.n === selectedStep(d) ? "sel" : null, onclick: () => { state.step = s.n; render(); loadLog(); } },
+    el("span", { class: "st " + s.status, title: STATUS[s.status] }, STEP_ICON[s.status] || "○"),
+    el("div", {},
+      el("div", { class: "ttl" }, `${s.n}. ${s.title || "Paso " + s.n}`),
+      s.files && s.files.length ? el("div", { class: "files" }, s.files.join("  ")) : null,
+      s.commits && s.commits.length ? el("div", { class: "commits" }, s.commits.map((c) => el("div", {}, "● " + c))) : null),
+    el("span", { class: "dur" }, stepDuration(s)))));
+  return el("section", { class: "card" },
+    el("h2", {}, el("span", { class: "t" }, "⚙ Ejecución (" + (x.model || "modelo local") + ")", pill(x.status)),
+      x.branch ? el("span", { class: "muted small" }, "rama " + x.branch) : null),
+    el("div", { class: "body" },
+      total ? el("div", { class: "progress", role: "progressbar", "aria-valuenow": done, "aria-valuemax": total },
+        el("div", { style: `width:${total ? 100 * done / total : 0}%` })) : null,
+      total ? list : el("p", { class: "muted small" }, "El plan no tiene pasos '### Paso N' todavía.")));
+}
+
+function selectedStep(d) {
+  if (state.step != null) return state.step;
+  const x = d.exec;
+  return x.current || (x.logs.length ? x.logs[x.logs.length - 1] : (x.steps[0] && x.steps[0].n));
+}
+
+function renderTerminal(d) {
+  const n = selectedStep(d);
+  const s = d.exec.steps.find((z) => z.n === n);
+  return el("section", { class: "card" },
+    el("h2", {}, el("span", { class: "t" }, `▶ Salida del paso ${n ?? ""}`, s ? pill(s.status) : null),
+      el("span", { class: "muted small" }, "Aider · " + (state.step == null ? "sigue al paso actual" : "fijado (clic en el paso actual para seguir)"))),
+    el("pre", { class: "term", id: "term" }, logText || "Sin salida para este paso todavía."));
+}
+
+let logText = "";
+function render() {
+  renderSelectors();
+  renderChips();
+  const main = $("#main");
+  if (!state.projects.length) {
+    main.replaceChildren(el("div", { class: "empty" },
+      el("p", {}, "Todavía no hay proyectos registrados."),
+      el("p", {}, "Empieza con ", el("code", {}, 'ai plan mi-app "tu tarea"'), " o abre ", el("code", {}, "ai dashboard mi-app"), ".")));
+    return;
+  }
+  const d = state.data;
+  if (!d) { main.replaceChildren(el("div", { class: "empty" }, "Este proyecto no tiene planes todavía: ", el("code", {}, 'ai plan <proyecto> "tarea"'))); return; }
+  // Conserva el scroll de la terminal y la línea de tiempo entre refrescos.
+  const keep = (id) => { const e = document.getElementById(id); return e ? { top: e.scrollTop, bottom: e.scrollHeight - e.scrollTop - e.clientHeight < 24 } : { bottom: true }; };
+  const kTerm = keep("term"), kTl = keep("timeline");
+  main.replaceChildren(renderPipeline(d),
+    el("div", { class: "grid" },
+      el("div", { class: "col" }, renderAnalysis(d), renderReview(d)),
+      el("div", { class: "col" }, renderExec(d), renderTerminal(d))));
+  for (const [id, k] of [["term", kTerm], ["timeline", kTl]]) {
+    const e = document.getElementById(id);
+    if (e) e.scrollTop = k.bottom ? e.scrollHeight : k.top;
+  }
+}
+
+// --- Datos ------------------------------------------------------------------
+function setLive(ok) {
+  state.failures = ok ? 0 : state.failures + 1;
+  $("#live").classList.toggle("on", state.failures === 0);
+  $("#live").title = state.failures ? "Sin conexión con ai dashboard (¿lo detuviste?)" : "Conectado";
+}
+
+async function loadProjects() {
+  try {
+    state.projects = await api("/api/projects");
+    if (!state.projects.some((p) => p.dir === state.project)) state.project = state.projects[0] ? state.projects[0].dir : "";
+    const proj = state.projects.find((p) => p.dir === state.project);
+    if (proj && !proj.runs.some((r) => r.name === state.run)) state.run = proj.runs[0] ? proj.runs[0].name : "";
+    saveUrl();
+    setLive(true);
+  } catch (e) { setLive(false); }
+}
+
+async function loadRun() {
+  if (!state.project || !state.run) { state.data = null; return; }
+  try { state.data = await api(`/api/run?project=${encodeURIComponent(state.project)}&run=${encodeURIComponent(state.run)}`); setLive(true); }
+  catch (e) { setLive(false); }
+}
+
+async function loadLog() {
+  const d = state.data;
+  const n = d && selectedStep(d);
+  if (!n) { logText = ""; return; }
+  try {
+    const r = await api(`/api/log?project=${encodeURIComponent(state.project)}&run=${encodeURIComponent(state.run)}&step=${n}`);
+    logText = r.text;
+  } catch (e) { /* conserva el último texto */ }
+}
+
+async function loadSystem() {
+  try { state.system = await api("/api/system"); } catch (e) { /* el chip se queda como estaba */ }
+}
+
+$("#project").addEventListener("change", (e) => { state.project = e.target.value; state.run = ""; state.step = null; refreshAll(); });
+$("#run").addEventListener("change", (e) => { state.run = e.target.value; state.step = null; state.showPlan = false; refreshAll(); });
+
+async function refreshAll() {
+  await loadProjects();
+  await loadRun();
+  await loadLog();
+  render();
+}
+// No redibujar mientras seleccionas texto (p. ej. para copiar un error de la terminal).
+const selecting = () => { const s = window.getSelection(); return s && !s.isCollapsed && $("#main").contains(s.anchorNode); };
+async function tick() {
+  await loadRun(); await loadLog();
+  if (!selecting()) render();
+  setTimeout(tick, REFRESH_MS);
+}
+async function slowTick() {
+  await Promise.all([loadProjects(), loadSystem()]);
+  if (!selecting()) render();
+  setTimeout(slowTick, SLOW_MS);
+}
+// Si fijas el paso que está en curso, vuelve a "seguir al actual".
+setInterval(() => { if (state.data && state.step === state.data.exec.current) state.step = null; }, REFRESH_MS);
+
+refreshAll().then(() => { slowTick(); setTimeout(tick, REFRESH_MS); });
+</script>
+</body>
+</html>

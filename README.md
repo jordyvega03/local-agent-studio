@@ -1,0 +1,177 @@
+# Agente local de desarrollo
+
+Sistema de dos agentes para desarrollar aplicaciones personales en un MacBook M4 / 24 GB:
+
+- **Opus (Claude Code)** analiza el proyecto y escribe un plan detallado. Solo puede leer.
+- **Un modelo local** (Ollama, por defecto `gpt-oss:20b`) ejecuta el plan paso a paso
+  con [Aider](https://aider.chat) **dentro de un contenedor Docker endurecido**.
+- Todo se controla con un único comando: **`ai`**.
+
+```
+ai up                                   # enciende (Docker + Ollama + modelo en RAM)
+ai plan mi-app "agregar login con email"  # Opus escribe mi-app/.ai/plans/…md
+ai exec mi-app                          # el modelo local lo implementa en la rama ai/…
+ai review mi-app                        # Opus revisa el diff
+ai dashboard mi-app                     # panel web en vivo de los agentes
+ai down                                 # apaga y libera ~14 GB de RAM
+```
+
+---
+
+## Requisitos (ya instalados)
+
+| Componente | Para qué | Instalación |
+|---|---|---|
+| Docker Desktop | Aislar al ejecutor | ya estaba |
+| Ollama (brew) | Correr el modelo con GPU Metal | `brew install ollama` |
+| Claude Code | Planificador Opus (usa tu login) | ya estaba |
+| Imagen `paulgauthier/aider` | Ejecutor dentro del contenedor | `ai up` la descarga |
+| `python3` (el de macOS) | Vista en vivo de `ai plan` y `ai dashboard` | viene con las Command Line Tools |
+| Modelo `gpt-oss:20b` | Cerebro del ejecutor (~14 GB) | `ai up` lo descarga |
+
+El comando `ai` está enlazado en `~/.local/bin/ai` → `bin/ai`. Para reinstalarlo:
+
+```bash
+ln -sf ~/Documents/agents/bin/ai ~/.local/bin/ai
+```
+
+## Flujo de trabajo
+
+### 1. Encender
+
+```bash
+ai up
+```
+
+Abre Docker Desktop si está cerrado, arranca Ollama **solo en 127.0.0.1**, descarga lo que
+falte y precarga el modelo en memoria.
+
+### 2. Planificar con Opus
+
+```bash
+ai plan mi-app "agregar endpoint GET /tasks con paginación"
+```
+
+- `mi-app` es una carpeta dentro de `~/Documents` (configurable con `PROJECTS_ROOT`),
+  o una ruta cualquiera.
+- Claude Code corre en modo **solo lectura** (`Read`, `Glob`, `Grep`).
+- Mientras trabaja ves en la terminal cada archivo que lee y cada búsqueda
+  (`📖 Read src/app.ts`, `🔎 Grep "router"`).
+- El plan queda en `mi-app/.ai/plans/AAAAMMDD-HHMM-<tarea>.md`.
+- **Revísalo y edítalo antes de ejecutar.** Es lo más barato de corregir.
+
+El formato del plan lo define `prompts/planner.md`: secciones `### Paso N` con archivo,
+cambio y verificación. `ai exec` depende de ese formato.
+
+### 3. Ejecutar con el modelo local
+
+```bash
+ai exec mi-app                 # último plan, paso a paso, automático
+ai exec mi-app .ai/plans/X.md  # un plan concreto
+ai exec mi-app --from 3        # reanudar desde el paso 3
+ai exec mi-app -i              # modo chat: tú guías, el plan está cargado como contexto
+```
+
+Lo que hace `ai exec`:
+
+1. Comprueba que Ollama y Docker estén arriba.
+2. Si el proyecto no es repo git, ofrece inicializarlo.
+3. Crea la rama **`ai/<nombre-del-plan>`**. Tu rama original queda intacta.
+4. Divide el plan en pasos y, por cada paso, lanza un contenedor efímero de Aider que:
+   - ve **solo** la carpeta del proyecto,
+   - recibe el plan completo como contexto de solo lectura y únicamente ese paso como orden,
+   - hace un commit por cambio.
+5. Si un paso falla, te dice cómo reanudar.
+
+### 4. Revisar
+
+```bash
+ai review mi-app        # Opus revisa el diff de la rama ai/… contra tu rama
+git diff main...HEAD    # o revisa tú
+git switch main && git merge ai/<plan>   # si te gusta
+git branch -D ai/<plan>                  # si no
+```
+
+### Ver a los agentes trabajar (panel web)
+
+```bash
+ai dashboard mi-app     # abre http://127.0.0.1:8765 en el navegador
+ai dashboard stop       # lo detiene (ai down también)
+```
+
+Una página que se actualiza sola y muestra, por cada plan:
+
+- **Pipeline** Análisis → Ejecución → Revisión, con el estado de cada etapa.
+- **Análisis (Opus):** cada archivo que leyó y cada búsqueda, con la hora, la duración
+  y el plan completo (botón "ver plan").
+- **Ejecución (modelo local):** barra de progreso, pasos con estado, duración, archivos y
+  commits de cada uno.
+- **Salida del paso:** lo mismo que ves en la terminal de Aider, en vivo. Haz clic en
+  cualquier paso para ver su salida.
+- **Revisión (Opus):** el texto de `ai review`.
+- **Sistema:** modelo cargado y % en GPU, RAM libre del Mac y contenedores activos.
+
+Puedes tener el panel abierto mientras lanzas `ai plan` / `ai exec` en otra terminal.
+Solo escucha en `127.0.0.1` y es de solo lectura (ver `docs/SECURITY.md`). El puerto
+se cambia con `DASHBOARD_PORT` en `config.env`.
+
+Los datos salen de `mi-app/.ai/logs/` (ver `docs/ARCHITECTURE.md`). `ai exec -i` y
+`ai chat` no se graban: ahí ya estás tú en la terminal.
+
+### 5. Apagar y liberar memoria
+
+```bash
+ai down          # descarga el modelo + detiene Ollama + borra contenedores
+ai down --all    # además cierra Docker Desktop (libera también su VM)
+```
+
+## Comandos
+
+| Comando | Descripción |
+|---|---|
+| `ai up [--no-warm]` | Arranca todo. `--no-warm` no precarga el modelo |
+| `ai down [--all]` | Libera memoria. `--all` cierra Docker Desktop |
+| `ai status` | Estado de Ollama/Docker, modelos en RAM, % de memoria libre |
+| `ai plan <proy> "tarea"` | Opus genera el plan |
+| `ai exec <proy> [plan] [-i] [--from N]` | El modelo local ejecuta |
+| `ai review <proy>` | Opus revisa el diff |
+| `ai chat <proy> [args aider]` | Chat libre con Aider + modelo local |
+| `ai dashboard [proy]` / `ai dashboard stop` | Panel web en vivo (127.0.0.1) / detenerlo |
+| `ai architect <proy>` | Aider architect: Opus + local en un solo chat (requiere `ANTHROPIC_API_KEY`) |
+| `ai models` / `ai pull X` / `ai rm X` | Gestión de modelos |
+| `ai use <modelo>` | Cambia el ejecutor en `config.env` |
+| `ai logs` | Log de Ollama en vivo |
+| `ai config` | Abre `config.env` |
+
+## Estructura del repo
+
+```
+agents/
+├── bin/ai                       # CLI principal (bash 3.2 compatible)
+├── config.env                   # TODA la configuración: modelos, contexto, límites
+├── docker/
+│   ├── compose.yml              # contenedores endurecidos (executor, architect)
+│   └── aider/
+│       ├── aider.conf.yml       # config de Aider (montada solo lectura)
+│       └── model-settings.yml   # ajustes por modelo (num_ctx, edit_format)
+├── prompts/planner.md           # instrucciones que recibe Opus para planificar
+├── lib/aiwatch.py               # eventos, análisis en vivo y servidor del panel
+├── dashboard/index.html         # panel web (sin dependencias externas)
+├── docs/
+│   ├── ARCHITECTURE.md          # cómo funciona por dentro
+│   ├── SECURITY.md              # modelo de amenazas y medidas
+│   ├── MODELS.md                # elección de modelos y memoria
+│   ├── TROUBLESHOOTING.md       # problemas comunes
+│   └── ROADMAP.md               # mejoras futuras
+├── logs/                        # (generado) ollama.log, dashboard.log
+└── run/                         # (generado) pids y lista de proyectos del panel
+```
+
+## Documentación
+
+- [Arquitectura](docs/ARCHITECTURE.md)
+- [Seguridad](docs/SECURITY.md)
+- [Modelos y memoria](docs/MODELS.md)
+- [Solución de problemas](docs/TROUBLESHOOTING.md)
+- [Roadmap / mejoras futuras](docs/ROADMAP.md)
+- [Plan: AI Studio (interfaz web)](docs/PLAN-STUDIO.md)

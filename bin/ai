@@ -1,0 +1,518 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  ai — agente local de desarrollo (Opus planifica, modelo local ejecuta)
+#  Documentación: README.md y docs/ en la raíz de este repo.
+#  Compatible con el bash 3.2 de macOS.
+# =============================================================================
+set -euo pipefail
+
+# --- Rutas -------------------------------------------------------------------
+SELF="$0"
+while [ -L "$SELF" ]; do                      # resolver symlink de ~/.local/bin/ai
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+AI_HOME="$(cd "$(dirname "$SELF")/.." && pwd)"
+COMPOSE_FILE="$AI_HOME/docker/compose.yml"
+COMPOSE_PROJECT="ai-agent"
+RUN_DIR="$AI_HOME/run"
+LOG_DIR="$AI_HOME/logs"
+PID_FILE="$RUN_DIR/ollama.pid"
+DASH_PID_FILE="$RUN_DIR/dashboard.pid"
+PROJECTS_FILE="$RUN_DIR/projects"            # proyectos que puede mostrar el panel
+AIWATCH="$AI_HOME/lib/aiwatch.py"
+mkdir -p "$RUN_DIR" "$LOG_DIR"
+
+# shellcheck source=../config.env
+source "$AI_HOME/config.env"
+OLLAMA_URL="http://$OLLAMA_HOST"
+OLLAMA_PORT="${OLLAMA_HOST##*:}"
+
+# --- Utilidades --------------------------------------------------------------
+c_blue=$'\033[34m'; c_green=$'\033[32m'; c_yellow=$'\033[33m'; c_red=$'\033[31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
+info() { echo "${c_blue}▸${c_off} $*"; }
+ok()   { echo "${c_green}✓${c_off} $*"; }
+warn() { echo "${c_yellow}!${c_off} $*" >&2; }
+die()  { echo "${c_red}✗${c_off} $*" >&2; exit 1; }
+
+confirm() {  # confirm "pregunta" -> 0 si sí
+  local reply
+  read -r -p "$1 [s/N] " reply
+  case "$reply" in s|S|si|SI|sí|y|Y) return 0 ;; *) return 1 ;; esac
+}
+
+ollama_running() { curl -sf -m 2 "$OLLAMA_URL/api/version" >/dev/null 2>&1; }
+docker_running() { docker info >/dev/null 2>&1; }
+
+model_installed() {
+  ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1" ||
+  ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1:latest"
+}
+
+# Resuelve "mi-app" -> $PROJECTS_ROOT/mi-app, o acepta ruta absoluta/relativa.
+resolve_project() {
+  local p="${1:-}"
+  [ -n "$p" ] || die "Falta el proyecto. Ej: ai exec ~/Documents/mi-app"
+  if [ -d "$p" ]; then (cd "$p" && pwd)
+  elif [ -d "$PROJECTS_ROOT/$p" ]; then (cd "$PROJECTS_ROOT/$p" && pwd)
+  else die "No existe el proyecto: $p (ni en $PROJECTS_ROOT/$p)"
+  fi
+}
+
+# Comprobación de seguridad: nunca montar el HOME completo ni carpetas sensibles.
+assert_safe_mount() {
+  local dir="$1"
+  case "$dir" in
+    "$HOME"|"/"|"/Users"|"$HOME/Documents"|"$HOME/Desktop"|"$HOME/Downloads"|"$HOME/Library"*|"$HOME/.ssh"*|"$HOME/.aws"*|"$HOME/.config"*)
+      die "Por seguridad no se monta '$dir' en el contenedor. Usa la carpeta de UN proyecto." ;;
+  esac
+}
+
+compose() {
+  PROJECT_DIR="${PROJECT_DIR:-$AI_HOME/run}" \
+  AIDER_IMAGE="$AIDER_IMAGE" EXECUTOR_MEM_LIMIT="$EXECUTOR_MEM_LIMIT" \
+  EXECUTOR_CPUS="$EXECUTOR_CPUS" OLLAMA_PORT="$OLLAMA_PORT" \
+  GIT_NAME="$(git config --global user.name || echo ai-agent)" \
+  GIT_EMAIL="$(git config --global user.email || echo ai-agent@localhost)" \
+    docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"
+}
+
+run_container() {  # run_container <servicio> <project_dir> <args aider...>
+  local service="$1" dir="$2"; shift 2
+  assert_safe_mount "$dir"
+  local tty_flag=""
+  [ -t 0 ] && [ -t 1 ] || tty_flag="-T"
+  PROJECT_DIR="$dir" compose run --rm $tty_flag "$service" "$@"
+}
+
+# Igual que run_container, pero guarda la salida en <log> para el panel.
+# Con terminal usa script(1), que conserva el TTY (colores y prompts de Aider).
+run_logged() {  # run_logged <log> <servicio> <project_dir> <args aider...>
+  local log="$1"; shift
+  if [ -t 0 ] && [ -t 1 ]; then
+    script -q -t 1 "$log" "$AI_HOME/bin/ai" _container "$@"
+  else
+    run_container "$@" 2>&1 | tee "$log"
+  fi
+}
+
+# --- Registro de actividad (lo lee `ai dashboard`) ---------------------------
+EVENT_LOG=""
+
+register_project() {  # register_project <dir>
+  touch "$PROJECTS_FILE"
+  grep -qxF "$1" "$PROJECTS_FILE" || echo "$1" >>"$PROJECTS_FILE"
+}
+
+# Prepara proyecto/.ai/logs/ y apunta EVENT_LOG al registro del plan.
+init_run_log() {  # init_run_log <dir> <nombre-del-plan>
+  local logdir="$1/.ai/logs"
+  mkdir -p "$logdir"
+  [ -f "$logdir/.gitignore" ] || echo '*' >"$logdir/.gitignore"
+  EVENT_LOG="$logdir/$2.jsonl"
+  register_project "$1"
+}
+
+ai_event() {  # ai_event <tipo> [clave=valor ...]   (nunca hace fallar al comando)
+  [ -n "$EVENT_LOG" ] && command -v python3 >/dev/null || return 0
+  python3 "$AIWATCH" event "$EVENT_LOG" "$@" 2>/dev/null || true
+}
+
+# --- Ollama ------------------------------------------------------------------
+start_ollama() {
+  if ollama_running; then ok "Ollama ya está corriendo en $OLLAMA_URL"; return; fi
+  command -v ollama >/dev/null || die "Ollama no está instalado: brew install ollama"
+  info "Iniciando Ollama en $OLLAMA_HOST (solo localhost)…"
+  OLLAMA_HOST="$OLLAMA_HOST" \
+  OLLAMA_CONTEXT_LENGTH="$OLLAMA_CONTEXT_LENGTH" \
+  OLLAMA_KEEP_ALIVE="$OLLAMA_KEEP_ALIVE" \
+  OLLAMA_MAX_LOADED_MODELS="$OLLAMA_MAX_LOADED_MODELS" \
+  OLLAMA_NUM_PARALLEL="$OLLAMA_NUM_PARALLEL" \
+  OLLAMA_FLASH_ATTENTION="$OLLAMA_FLASH_ATTENTION" \
+  OLLAMA_KV_CACHE_TYPE="$OLLAMA_KV_CACHE_TYPE" \
+    nohup ollama serve >>"$LOG_DIR/ollama.log" 2>&1 &
+  echo $! >"$PID_FILE"
+  local i
+  for i in $(seq 1 30); do ollama_running && { ok "Ollama listo (pid $(cat "$PID_FILE"))"; return; }; sleep 1; done
+  die "Ollama no respondió. Revisa: ai logs"
+}
+
+unload_models() {
+  ollama_running || return 0
+  local m
+  for m in $(ollama ps 2>/dev/null | awk 'NR>1 {print $1}'); do
+    info "Descargando de memoria: $m"
+    OLLAMA_HOST="$OLLAMA_HOST" ollama stop "$m" >/dev/null 2>&1 || true
+  done
+}
+
+stop_ollama() {
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    kill "$(cat "$PID_FILE")" && ok "Ollama detenido"
+  elif ollama_running; then
+    warn "Hay un Ollama corriendo que no lanzó este script (¿app Ollama o brew services?)."
+    warn "Ciérralo con: brew services stop ollama   o   cierra la app Ollama."
+  fi
+  rm -f "$PID_FILE"
+}
+
+warm_model() {
+  info "Cargando $EXECUTOR_MODEL en memoria (keep_alive=$OLLAMA_KEEP_ALIVE)…"
+  curl -sf -m 300 "$OLLAMA_URL/api/generate" \
+    -d "{\"model\":\"$EXECUTOR_MODEL\",\"keep_alive\":\"$OLLAMA_KEEP_ALIVE\"}" >/dev/null \
+    && ok "Modelo cargado" || warn "No se pudo precargar el modelo (se cargará al primer uso)"
+}
+
+ensure_docker() {
+  docker_running && return
+  info "Docker no está corriendo; abriendo Docker Desktop…"
+  open -a Docker
+  local i
+  for i in $(seq 1 60); do docker_running && { ok "Docker listo"; return; }; sleep 2; done
+  die "Docker no arrancó a tiempo."
+}
+
+# --- Comandos ----------------------------------------------------------------
+cmd_up() {
+  local warm=1
+  [ "${1:-}" = "--no-warm" ] && warm=0
+  ensure_docker
+  docker image inspect "$AIDER_IMAGE" >/dev/null 2>&1 || { info "Descargando imagen ${AIDER_IMAGE}…"; docker pull "$AIDER_IMAGE"; }
+  start_ollama
+  if ! model_installed "$EXECUTOR_MODEL"; then
+    info "El modelo $EXECUTOR_MODEL no está descargado. Descargando (puede tardar)…"
+    OLLAMA_HOST="$OLLAMA_HOST" ollama pull "$EXECUTOR_MODEL"
+  fi
+  [ "$warm" = 1 ] && warm_model
+  echo; cmd_status
+}
+
+cmd_down() {
+  local quit_docker=0
+  [ "${1:-}" = "--all" ] && quit_docker=1
+  info "Deteniendo contenedores del agente…"
+  compose down --remove-orphans >/dev/null 2>&1 || true
+  docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  unload_models
+  stop_ollama
+  stop_dashboard
+  if [ "$quit_docker" = 1 ]; then
+    info "Cerrando Docker Desktop (libera la RAM de su VM)…"
+    osascript -e 'quit app "Docker"' >/dev/null 2>&1 || true
+    ok "Docker Desktop cerrado"
+  fi
+  ok "Memoria liberada. Vuelve con: ai up"
+}
+
+cmd_status() {
+  echo "${c_dim}── Ollama ─────────────────────────────${c_off}"
+  if ollama_running; then
+    ok "corriendo en $OLLAMA_URL"
+    local loaded; loaded="$(OLLAMA_HOST="$OLLAMA_HOST" ollama ps 2>/dev/null | awk 'NR>1')"
+    if [ -n "$loaded" ]; then OLLAMA_HOST="$OLLAMA_HOST" ollama ps; else echo "  (ningún modelo en memoria)"; fi
+  else
+    echo "  detenido"
+  fi
+  echo "${c_dim}── Docker ─────────────────────────────${c_off}"
+  if docker_running; then
+    ok "Docker corriendo"
+    docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --format '  {{.Names}}  {{.Status}}'
+  else
+    echo "  detenido"
+  fi
+  echo "${c_dim}── Config ─────────────────────────────${c_off}"
+  echo "  ejecutor:     $EXECUTOR_MODEL"
+  echo "  planificador: $PLANNER_MODEL (Claude Code)"
+  echo "  contexto:     $OLLAMA_CONTEXT_LENGTH tokens · keep_alive $OLLAMA_KEEP_ALIVE"
+  if dashboard_running; then echo "  panel:        http://127.0.0.1:$DASHBOARD_PORT/"; else echo "  panel:        detenido (ai dashboard)"; fi
+  echo "${c_dim}── Memoria del Mac ────────────────────${c_off}"
+  memory_pressure 2>/dev/null | grep -i "free percentage" | sed 's/^/  /' || true
+}
+
+cmd_plan() {
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  local task="$*"
+  [ -n "$task" ] || die 'Falta la tarea. Ej: ai plan mi-app "agregar login con email"'
+  command -v claude >/dev/null || die "Claude Code no está instalado."
+  mkdir -p "$dir/.ai/plans"
+  local slug; slug="$(echo "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-40 | sed 's/-$//')"
+  local file="$dir/.ai/plans/$(date +%Y%m%d-%H%M)-$slug.md"
+  info "Opus ($PLANNER_MODEL) analizando $(basename "$dir") en modo solo lectura…"
+  if ! command -v python3 >/dev/null; then   # sin python3: sin vista en vivo ni panel
+    (cd "$dir" && claude -p "$(cat "$AI_HOME/prompts/planner.md") $task" \
+        --model "$PLANNER_MODEL" \
+        --allowedTools "Read" "Glob" "Grep" \
+        --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch") >"$file"
+    [ -s "$file" ] || { rm -f "$file"; die "El planificador no devolvió nada."; }
+  else
+    # stream-json: cada herramienta que usa Opus se ve aquí y en `ai dashboard`.
+    init_run_log "$dir" "$(basename "$file" .md)"
+    ai_event plan_started task="$task" model="$PLANNER_MODEL"
+    PLAN_STATE=running
+    trap 'if [ "$PLAN_STATE" = running ]; then ai_event plan_aborted; fi' EXIT
+    if ! (cd "$dir" && claude -p "$(cat "$AI_HOME/prompts/planner.md") $task" \
+        --model "$PLANNER_MODEL" --output-format stream-json --verbose \
+        --allowedTools "Read" "Glob" "Grep" \
+        --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
+        | python3 "$AIWATCH" plan-stream "$EVENT_LOG" "$file"); then
+      PLAN_STATE=failed; rm -f "$file"; die "El planificador no devolvió nada."
+    fi
+    PLAN_STATE=done
+  fi
+  ok "Plan guardado: ${file#$dir/}"
+  echo "   Revísalo/edítalo y luego: ai exec $(basename "$dir")"
+}
+
+latest_plan() {  # latest_plan <dir>
+  ls -t "$1"/.ai/plans/*.md 2>/dev/null | head -1
+}
+
+current_plan() {  # current_plan <dir>  -> plan de la rama ai/* actual, o el más reciente
+  local b; b="$(git -C "$1" branch --show-current 2>/dev/null || true)"
+  case "$b" in ai/*) [ -f "$1/.ai/plans/${b#ai/}.md" ] && { echo "$1/.ai/plans/${b#ai/}.md"; return 0; } ;; esac
+  latest_plan "$1" || true
+}
+
+# Prepara git: rama propia para el agente y aviso si hay cambios sin commitear.
+prepare_git() {
+  local dir="$1" name="$2"
+  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || {
+    warn "$(basename "$dir") no es un repo git. Sin git no podrás revertir fácilmente."
+    confirm "¿Inicializar git ahora?" && { git -C "$dir" init -q && git -C "$dir" add -A && git -C "$dir" commit -qm "Estado inicial antes del agente" && ok "Repo creado"; }
+    return 0
+  }
+  if [ -n "$(git -C "$dir" status --porcelain -- . ':!.ai')" ]; then
+    warn "Hay cambios sin commitear en $(basename "$dir")."
+    confirm "¿Continuar? (el agente los incluirá en sus commits)" || die "Cancelado."
+  fi
+  local branch; branch="$(git -C "$dir" branch --show-current)"
+  case "$branch" in
+    ai/*) info "Usando rama existente $branch" ;;
+    *) git -C "$dir" switch -q -c "ai/$name" 2>/dev/null || git -C "$dir" switch -q "ai/$name"
+       ok "Trabajando en la rama ai/$name (tu rama $branch queda intacta)" ;;
+  esac
+}
+
+# Extrae los pasos "### Paso N" del plan a archivos separados en $tmp.
+split_steps() {  # split_steps <plan> <tmpdir>  -> imprime número de pasos
+  awk -v out="$2" '
+    /^### Paso / { n++; f = sprintf("%s/%03d.md", out, n) }
+    /^## / { f = "" }
+    f { print > f }
+    END { print n+0 }' "$1"
+}
+
+cmd_exec() {
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  local plan="" interactive=0 from=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -i|--interactive) interactive=1 ;;
+      --from) from="$2"; shift ;;
+      *) plan="$1" ;;
+    esac; shift
+  done
+  [ -n "$plan" ] || plan="$(latest_plan "$dir")"
+  [ -n "$plan" ] || die "No hay planes en $dir/.ai/plans. Crea uno: ai plan $(basename "$dir") \"tarea\""
+  case "$plan" in /*) ;; *) [ -f "$dir/$plan" ] && plan="$dir/$plan" || plan="$(cd "$(dirname "$plan")" && pwd)/$(basename "$plan")" ;; esac
+  [ -f "$plan" ] || die "No existe el plan: $plan"
+  case "$plan" in "$dir"/*) ;; *) die "El plan debe estar dentro del proyecto (el contenedor solo ve esa carpeta)." ;; esac
+  local rel="${plan#$dir/}"
+
+  cmd_up --no-warm >/dev/null
+  local name; name="$(basename "$plan" .md)"
+  prepare_git "$dir" "$name"
+  init_run_log "$dir" "$name"
+  local branch; branch="$(git -C "$dir" branch --show-current 2>/dev/null || true)"
+
+  local model="ollama_chat/$EXECUTOR_MODEL"
+  if [ "$interactive" = 1 ]; then
+    info "Chat interactivo con el plan cargado (solo lectura): $rel"
+    ai_event exec_started mode=interactive model="$EXECUTOR_MODEL" branch="$branch" from=1
+    run_container executor "$dir" --model "$model" --read "$rel"
+    ai_event exec_done
+    return
+  fi
+
+  STEPS_TMP="$(mktemp -d "$dir/.ai/.steps.XXXX")"
+  EXEC_STATE=running
+  # Al salir: borra los pasos temporales y, si se cortó (Ctrl+C), lo deja registrado.
+  trap 'rm -rf "$STEPS_TMP"; if [ "$EXEC_STATE" = running ]; then ai_event exec_aborted; fi' EXIT
+  local tmp="$STEPS_TMP"
+  local total; total="$(split_steps "$plan" "$tmp")"
+  [ "$total" -gt 0 ] || { EXEC_STATE=failed; die "El plan no tiene secciones '### Paso N'. Usa: ai exec $(basename "$dir") -i"; }
+  info "Ejecutando $total pasos de $rel con $EXECUTOR_MODEL"
+  ai_event exec_started mode=steps model="$EXECUTOR_MODEL" branch="$branch" total="$total" from="$from"
+  local n step files title slog before t0
+  for n in $(seq "$from" "$total"); do
+    step="$tmp/$(printf '%03d' "$n").md"
+    slog="$dir/.ai/logs/$name.step-$(printf '%03d' "$n").log"
+    # Archivos citados en la línea "Archivo(s):" -> se pasan a aider para editar.
+    files="$(grep -m1 -i 'archivo' "$step" | grep -oE '`[^`]+`' | tr -d '`' | grep -v ' ' || true)"
+    title="$(head -1 "$step" | sed 's/^### //')"
+    echo; echo "${c_blue}━━━ Paso $n/$total ━━━${c_off}  $title"
+    before="$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)"
+    t0="$(date +%s)"
+    ai_event step_started n="$n" title="$title" files="$(echo $files)"
+    # shellcheck disable=SC2086
+    if run_logged "$slog" executor "$dir" --model "$model" --yes-always --no-suggest-shell-commands \
+      --read "$rel" $files \
+      --message "Implementa ÚNICAMENTE este paso del plan (el plan completo está en $rel, solo como contexto). No hagas otros pasos.
+
+$(cat "$step")"; then
+      ai_event step_done n="$n" secs="$(( $(date +%s) - t0 ))" \
+        commits="$(git -C "$dir" log --format='%h %s' "${before:+$before..}HEAD" 2>/dev/null || true)"
+    else
+      ai_event step_failed n="$n" secs="$(( $(date +%s) - t0 ))"
+      ai_event exec_failed n="$n"
+      EXEC_STATE=failed
+      warn "Falló el paso $n. Reanuda con: ai exec $(basename "$dir") $rel --from $n"; exit 1
+    fi
+  done
+  EXEC_STATE=done
+  ai_event exec_done
+  echo; ok "Plan completado. Revisa los cambios:"
+  echo "   git -C \"$dir\" log --oneline $(git -C "$dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null || echo main)..HEAD"
+  echo "   ai review $(basename "$dir")   # para que Opus revise el diff"
+}
+
+cmd_chat() {
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  cmd_up --no-warm >/dev/null
+  run_container executor "$dir" --model "ollama_chat/$EXECUTOR_MODEL" "$@"
+}
+
+cmd_architect() {
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || die "ai architect necesita ANTHROPIC_API_KEY exportada (export ANTHROPIC_API_KEY=...). Sin API key usa: ai plan + ai exec"
+  cmd_up --no-warm >/dev/null
+  run_container architect "$dir" --architect --model "$ARCHITECT_MODEL" \
+    --editor-model "ollama_chat/$EXECUTOR_MODEL" "$@"
+}
+
+cmd_review() {
+  local dir; dir="$(resolve_project "${1:-}")"
+  local base; base="$(git -C "$dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null || echo main)"
+  # La revisión queda junto al plan de la rama (proyecto/.ai/logs/<plan>.review.md) para el panel.
+  local plan; plan="$(current_plan "$dir")"
+  local planref=".ai/plans/ más reciente" out=/dev/null
+  if [ -n "$plan" ]; then
+    planref="${plan#$dir/}"
+    init_run_log "$dir" "$(basename "$plan" .md)"
+    out="${EVENT_LOG%.jsonl}.review.md"
+  fi
+  info "Opus revisando el diff $base...HEAD de $(basename "$dir")…"
+  ai_event review_started base="$base"
+  if (cd "$dir" && git diff "$base...HEAD" | claude -p \
+    "Revisa este diff hecho por un modelo local siguiendo el plan $planref. Señala bugs, pasos del plan no cumplidos y problemas de seguridad. Sé concreto (archivo:línea). Responde en español." \
+    --model "$PLANNER_MODEL" \
+    --allowedTools "Read" "Glob" "Grep" --disallowedTools "Edit" "Write" "Bash" | tee "$out"); then
+    ai_event review_done
+  else
+    ai_event review_failed; die "La revisión falló."
+  fi
+}
+
+# --- Panel web ---------------------------------------------------------------
+dashboard_running() { [ -f "$DASH_PID_FILE" ] && kill -0 "$(cat "$DASH_PID_FILE")" 2>/dev/null; }
+
+stop_dashboard() {
+  if dashboard_running; then kill "$(cat "$DASH_PID_FILE")" && ok "Panel detenido"; fi
+  rm -f "$DASH_PID_FILE"
+}
+
+cmd_dashboard() {
+  [ "${1:-}" = "stop" ] && { stop_dashboard; return; }
+  command -v python3 >/dev/null || die "ai dashboard necesita python3 (xcode-select --install)."
+  local url="http://127.0.0.1:$DASHBOARD_PORT/"
+  if [ -n "${1:-}" ]; then
+    local dir; dir="$(resolve_project "$1")"
+    register_project "$dir"
+    url="$url?project=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$dir")"
+  fi
+  if ! dashboard_running; then
+    info "Iniciando el panel en http://127.0.0.1:$DASHBOARD_PORT (solo localhost)…"
+    EXECUTOR_MODEL="$EXECUTOR_MODEL" PLANNER_MODEL="$PLANNER_MODEL" OLLAMA_URL="$OLLAMA_URL" \
+    COMPOSE_PROJECT="$COMPOSE_PROJECT" \
+      nohup python3 "$AIWATCH" serve "$AI_HOME" "$DASHBOARD_PORT" >>"$LOG_DIR/dashboard.log" 2>&1 &
+    echo $! >"$DASH_PID_FILE"
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      curl -sf -m 1 "http://127.0.0.1:$DASHBOARD_PORT/" >/dev/null 2>&1 && break
+      dashboard_running || { rm -f "$DASH_PID_FILE"; die "El panel no arrancó (¿puerto $DASHBOARD_PORT ocupado?). Revisa $LOG_DIR/dashboard.log"; }
+      sleep 0.5
+    done
+  fi
+  ok "Panel: $url"
+  echo "   Se actualiza solo. Detenlo con: ai dashboard stop (o ai down)"
+  open "$url"
+}
+
+cmd_use() {
+  local m="${1:-}"
+  [ -n "$m" ] || die "Uso: ai use <modelo>   (ej: ai use qwen3-coder:30b)"
+  sed -i '' "s|^EXECUTOR_MODEL=.*|EXECUTOR_MODEL=\"$m\"|" "$AI_HOME/config.env"
+  ok "Ejecutor cambiado a $m"
+  grep -q "ollama_chat/$m\$" "$AI_HOME/docker/aider/model-settings.yml" ||
+    warn "Añade un bloque para ollama_chat/$m en docker/aider/model-settings.yml (num_ctx)."
+  if ollama_running; then unload_models; model_installed "$m" || OLLAMA_HOST="$OLLAMA_HOST" ollama pull "$m"; fi
+}
+
+cmd_help() {
+  cat <<EOF
+${c_blue}ai${c_off} — agente local de desarrollo (Opus planifica, $EXECUTOR_MODEL ejecuta)
+
+${c_dim}Ciclo de vida${c_off}
+  ai up                 Arranca Docker + Ollama y carga el modelo en memoria
+  ai down               Descarga el modelo y detiene Ollama (libera la RAM)
+  ai down --all         Además cierra Docker Desktop
+  ai status             Estado, modelos cargados y memoria
+
+${c_dim}Trabajo${c_off}
+  ai plan <proyecto> "tarea"     Opus analiza (solo lectura) y escribe .ai/plans/*.md
+  ai exec <proyecto> [plan]      El modelo local ejecuta el plan paso a paso
+         [-i]                    …o en chat interactivo con el plan cargado
+         [--from N]              …reanudando desde el paso N
+  ai review <proyecto>           Opus revisa el diff que hizo el agente
+  ai chat <proyecto>             Chat libre con el modelo local (Aider)
+  ai dashboard [proyecto]        Panel web en vivo de los agentes (127.0.0.1)
+  ai dashboard stop              Detiene el panel
+  ai architect <proyecto>        Aider: Opus arquitecto + local editor (API key)
+
+${c_dim}Modelos${c_off}
+  ai models             Modelos descargados
+  ai use <modelo>       Cambia el ejecutor (ej: qwen3-coder:30b)
+  ai pull <modelo>      Descarga un modelo
+  ai rm <modelo>        Borra un modelo del disco
+
+${c_dim}Otros${c_off}
+  ai logs               Log de Ollama
+  ai config             Abre config.env
+
+<proyecto> = ruta, o nombre de carpeta dentro de $PROJECTS_ROOT
+Docs: $AI_HOME/README.md
+EOF
+}
+
+# --- Entrada -----------------------------------------------------------------
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  up)        cmd_up "$@" ;;
+  down|stop) cmd_down "$@" ;;
+  status|st) cmd_status ;;
+  plan)      cmd_plan "$@" ;;
+  exec|run)  cmd_exec "$@" ;;
+  dashboard|ui) cmd_dashboard "$@" ;;
+  _container) run_container "$@" ;;   # interno: lo usa run_logged vía script(1)
+  review)    cmd_review "$@" ;;
+  chat)      cmd_chat "$@" ;;
+  architect) cmd_architect "$@" ;;
+  models)    ollama_running || start_ollama >/dev/null; OLLAMA_HOST="$OLLAMA_HOST" ollama list ;;
+  use)       cmd_use "$@" ;;
+  pull)      ollama_running || start_ollama; OLLAMA_HOST="$OLLAMA_HOST" ollama pull "${1:?modelo}" ;;
+  rm)        ollama_running || start_ollama; OLLAMA_HOST="$OLLAMA_HOST" ollama rm "${1:?modelo}" ;;
+  logs)      tail -n "${1:-50}" -f "$LOG_DIR/ollama.log" ;;
+  config)    "${EDITOR:-open}" "$AI_HOME/config.env" ;;
+  help|-h|--help) cmd_help ;;
+  *) die "Comando desconocido: $cmd (ai help)" ;;
+esac

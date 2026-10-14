@@ -1,0 +1,26 @@
+# Configuración de Aider dentro del contenedor (montada en /config, solo lectura).
+# Referencia de opciones: https://aider.chat/docs/config/aider_conf.html
+# El modelo se pasa desde bin/ai (--model), según config.env.
+
+model-settings-file: /config/model-settings.yml
+
+# Git: cada cambio del agente queda como commit -> fácil de revisar y revertir.
+auto-commits: true
+dirty-commits: true
+attribute-author: false
+attribute-committer: false
+attribute-co-authored-by: true
+
+# Privacidad / sin red innecesaria
+analytics-disable: true
+check-update: false
+show-model-warnings: false
+
+# Eficiencia de contexto para un modelo local
+map-tokens: 2048
+cache-prompts: false
+
+# Interfaz
+pretty: true
+stream: true
+dark-mode: true

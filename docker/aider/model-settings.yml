@@ -1,0 +1,21 @@
+# Ajustes por modelo para Aider. Al añadir un modelo nuevo a config.env,
+# añade aquí su bloque (el nombre lleva el prefijo ollama_chat/).
+# num_ctx debe coincidir con OLLAMA_CONTEXT_LENGTH de config.env.
+
+- name: ollama_chat/gpt-oss:20b
+  edit_format: diff
+  use_repo_map: true
+  extra_params:
+    num_ctx: 32768
+
+- name: ollama_chat/qwen3-coder:30b
+  edit_format: diff
+  use_repo_map: true
+  extra_params:
+    num_ctx: 32768
+
+- name: ollama_chat/devstral:24b
+  edit_format: diff
+  use_repo_map: true
+  extra_params:
+    num_ctx: 32768

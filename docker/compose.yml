@@ -1,0 +1,45 @@
+# Contenedores del agente. Los lanza bin/ai con `docker compose run --rm`;
+# no hay servicios permanentes: cada ejecución crea y destruye su contenedor.
+#
+# Variables que inyecta bin/ai: PROJECT_DIR, AIDER_IMAGE, EXECUTOR_MEM_LIMIT,
+# EXECUTOR_CPUS, OLLAMA_PORT, GIT_NAME, GIT_EMAIL.
+
+x-hardened: &hardened
+  image: ${AIDER_IMAGE}
+  user: "1000:1000"                 # usuario sin privilegios de la imagen
+  read_only: true                   # sistema de archivos del contenedor inmutable
+  cap_drop: [ALL]                   # sin capacidades de kernel
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: ${EXECUTOR_MEM_LIMIT}
+  cpus: ${EXECUTOR_CPUS}
+  pids_limit: 512
+  tmpfs:
+    - /tmp:rw,size=512m,uid=1000,gid=1000
+  working_dir: /app
+  volumes:
+    - ${PROJECT_DIR}:/app                       # ÚNICA carpeta tuya visible
+    - ./aider:/config:ro                       # config de aider (solo lectura)
+  environment: &env
+    HOME: /tmp/home
+    OLLAMA_API_BASE: http://host.docker.internal:${OLLAMA_PORT}
+    LITELLM_LOCAL_MODEL_COST_MAP: "True"        # no descargar tablas de precios
+    GIT_AUTHOR_NAME: ${GIT_NAME}
+    GIT_AUTHOR_EMAIL: ${GIT_EMAIL}
+    GIT_COMMITTER_NAME: ${GIT_NAME}
+    GIT_COMMITTER_EMAIL: ${GIT_EMAIL}
+  entrypoint: ["/venv/bin/aider", "--config", "/config/aider.conf.yml"]
+  stdin_open: true
+  tty: true
+
+services:
+  # Ejecutor 100% local: sin API keys dentro.
+  executor:
+    <<: *hardened
+
+  # Aider en modo architect: Opus planifica y el modelo local edita.
+  # Única diferencia: recibe ANTHROPIC_API_KEY.
+  architect:
+    <<: *hardened
+    environment:
+      <<: *env
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
