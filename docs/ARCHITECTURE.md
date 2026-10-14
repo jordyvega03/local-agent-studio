@@ -199,7 +199,11 @@ prompts/agents/  ┘        │
   `agent_started/agent_done/agent_failed` + los `exec_*/step_*` de sus pasos. `run_state()`
   y `runState()` devuelven `agent`, y el título de la sesión es `Agente: tarea`.
 - Verificación: `aiwatch.py detect-verify` (o `VERIFY_CMD` de `.ai/project.env`), ejecutada
-  con `run_verify`: el mismo servicio endurecido con `--entrypoint /bin/sh`.
+  con `run_verify`: el mismo servicio endurecido con `--entrypoint /bin/sh`, sin dejar
+  `__pycache__` ni `.pytest_cache` en el proyecto (`PYTHONDONTWRITEBYTECODE`, `PYTEST_ADDOPTS`).
+- En una rama `ai/<plan>` el agente aider recibe el plan con `--read` (solo lectura): en el
+  flujo `feature` el Tester completa los tests del plan en vez de crear otros duplicados
+  (lo detectó la revisión de Opus en la primera prueba real del flujo).
 - Imagen: `docker/executor/Dockerfile` copia el binario de Node de la imagen oficial
   (`EXECUTOR_NODE_IMAGE`) sobre `AIDER_IMAGE` e instala pytest; etiqueta `EXECUTOR_IMAGE`.
 - El Studio lista/crea/edita agentes (`server/agents.ts`): valida cada campo y escribe el

@@ -4,6 +4,9 @@ Cada agente es un `agents/<nombre>.env` + sus instrucciones en `prompts/agents/<
 Se lanzan con `ai agent <nombre> <proyecto> "tarea"` o desde el Studio (pestaña Agentes).
 El Studio también los crea y edita (escribe estos mismos archivos).
 
+Si el agente trabaja en la rama de un plan (`ai/<plan>`, p. ej. dentro de un flujo tras
+`exec`), recibe ese plan como contexto de solo lectura para respetar su alcance.
+
 Formato: una línea `CLAVE='valor'` por campo, **sin comillas dentro del valor**. `bin/ai`
 lee los valores sin ejecutar el archivo.
 

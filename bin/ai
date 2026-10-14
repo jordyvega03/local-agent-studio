@@ -119,8 +119,9 @@ run_verify() {  # run_verify <project_dir> <comando>
   assert_safe_mount "$1"
   local tty_flag=""
   [ -t 0 ] && [ -t 1 ] || tty_flag="-T"
-  # Sin __pycache__ ni .pyc en el proyecto por ejecutar las comprobaciones.
-  PROJECT_DIR="$1" compose run --rm $tty_flag -e PYTHONDONTWRITEBYTECODE=1 --entrypoint /bin/sh executor -c "$2"
+  # Sin __pycache__, .pyc ni .pytest_cache en el proyecto por ejecutar las comprobaciones.
+  PROJECT_DIR="$1" compose run --rm $tty_flag -e PYTHONDONTWRITEBYTECODE=1 -e "PYTEST_ADDOPTS=-p no:cacheprovider" \
+    --entrypoint /bin/sh executor -c "$2"
 }
 
 run_logged_verify() {  # run_logged_verify <log> <project_dir> <comando>
@@ -615,9 +616,13 @@ TAREA: $task" --model "$model" --output-format stream-json --verbose \
   ai_event step_started n=1 title="$label: $task"
   meter_context project="$dir" run="$run" step=1 agent="$name"
   local dry=""; [ "$access" = read ] && dry="--dry-run"
+  # En la rama de un plan (ai/<plan>, p. ej. dentro de un flujo), el agente lo recibe como
+  # contexto de solo lectura: así respeta su alcance y no rehace lo que el plan ya hizo.
+  local planctx=""
+  case "$branch" in ai/*) [ -f "$dir/.ai/plans/${branch#ai/}.md" ] && planctx=".ai/plans/${branch#ai/}.md" ;; esac
   # shellcheck disable=SC2086
   if run_logged "$slog" executor "$dir" --model "ollama_chat/$model" --yes-always --no-suggest-shell-commands $dry \
-      --message "$(cat "$prompt")
+      ${planctx:+--read "$planctx"} --message "$(cat "$prompt")
 
 TAREA:
 $task"; then

@@ -36,6 +36,11 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-14 — **Prueba real con Opus** del flujo feature (plan, exec, tester, review):
+      todo funciona. Arreglos de lo que encontró la revisión: el Tester completa los tests
+      existentes y respeta el plan (que recibe como contexto en la rama `ai/<plan>`), y la
+      verificación ya no deja `.pytest_cache`.
+
 - [x] 2026-10-14 — **AI Studio, Fase 6 (extras)**: notificaciones de macOS (fin/fallo de
       plan, exec, review, agentes y flujos; flujo esperando aprobación), autocompletado zsh
       (`ai completion`) y selector de tema automático/claro/oscuro en el Studio.
