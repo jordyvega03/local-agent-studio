@@ -3,7 +3,7 @@
 // runs.test.ts fijan el comportamiento.
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { OpusUsage, PlanStep, Project, RunState, RunSummary, Status, TokenStats } from "../shared/types.ts";
+import type { AgentRun, OpusUsage, PlanStep, Project, RunState, RunSummary, Status, TokenStats } from "../shared/types.ts";
 
 export const RUN_NAME = /^[A-Za-z0-9._-]+$/;
 const STEP_RE = /^### Paso (\d+)\s*[:.\-—]?\s*(.*)$/;
@@ -79,6 +79,7 @@ export function runState(pdir: string, name: string): RunState {
   const exec: RunState["exec"] = { status: "pending", steps: planSteps, current: null, logs: [] };
   const review: RunState["review"] = { status: "pending" };
   const opus: OpusUsage = {};
+  let agent: AgentRun | null = null;
   const addOpus = (ev: Event) => {
     for (const k of OPUS_FIELDS) if (ev[k] != null) opus[k] = (opus[k] ?? 0) + Number(ev[k]);
   };
@@ -143,6 +144,29 @@ export function runState(pdir: string, name: string): RunState {
         Object.assign(exec, { status: ev.type === "exec_failed" ? "failed" : "aborted", finished: ts });
         for (const s of exec.steps) if (s.status === "running") s.status = "aborted";
         break;
+      case "agent_started": {
+        agent = { status: "running", started: ts, tools: [], notes: [] };
+        for (const k of ["agent", "label", "engine", "model", "task", "access"] as const) {
+          if (ev[k] != null) (agent as unknown as Record<string, unknown>)[k] = ev[k];
+        }
+        break;
+      }
+      case "agent_tool":
+        agent?.tools.push({ ts: ts ?? "", tool: str(ev.tool) ?? "?", target: str(ev.target) ?? "" });
+        break;
+      case "agent_note":
+        agent?.notes.push({ ts: ts ?? "", text: str(ev.text) ?? "" });
+        break;
+      case "agent_done":
+        if (agent) {
+          Object.assign(agent, { status: "done", finished: ts });
+          for (const k of ["secs", "duration_ms", "turns"] as const) if (ev[k] != null) agent[k] = Number(ev[k]);
+          addOpus(ev);
+        }
+        break;
+      case "agent_failed":
+        if (agent) Object.assign(agent, { status: "failed", finished: ts, error: str(ev.error) ?? "falló" });
+        break;
       case "review_started": Object.assign(review, { status: "running", started: ts }); break;
       case "review_done": Object.assign(review, { status: "done", finished: ts }); addOpus(ev); break;
       case "review_failed": Object.assign(review, { status: "failed", finished: ts }); break;
@@ -165,10 +189,17 @@ export function runState(pdir: string, name: string): RunState {
   }
   const tokens = { executor: tok.length ? tokenStats(tok) : null, opus: Object.keys(opus).length ? opus : null };
 
+  if (agent) {
+    const a: AgentRun = agent;
+    const result = readText(join(logsDir(pdir), name + ".result.md"));
+    if (result != null) a.result = result;
+    if (!plan.title) plan.title = `${a.label ?? a.agent}: ${a.task ?? ""}`.slice(0, 120);
+  }
+
   let mtime: number | undefined;
   try { mtime = statSync(planPath).mtimeMs; } catch { /* sin plan */ }
 
-  return { name, plan: { ...plan, mtime }, analysis, exec, review, tokens, events: events.length, updated: runMtime(pdir, name) };
+  return { name, plan: { ...plan, mtime }, analysis, exec, review, tokens, agent, events: events.length, updated: runMtime(pdir, name) };
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -185,6 +216,7 @@ function runMtime(pdir: string, name: string): number {
 
 export function runSummary(pdir: string, name: string): RunSummary {
   const st = runState(pdir, name);
+  if (st.agent) return { name, title: st.plan.title || name, stage: "agent", status: st.agent.status, updated: st.updated };
   let stage: RunSummary["stage"] = "analysis";
   let status: Status = st.analysis.status;
   if (st.exec.status !== "pending") { stage = "exec"; status = st.exec.status; }

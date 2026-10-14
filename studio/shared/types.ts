@@ -65,6 +65,39 @@ export interface Execution {
 
 export interface Review { status: Status; text?: string; started?: string; finished?: string }
 
+/** Una ejecución de `ai agent` (Fase 4). Sus pasos van en exec (1 = agente, 2 = verificación). */
+export interface AgentRun {
+  agent?: string;          // id (agents/<id>.env)
+  label?: string;
+  engine?: "aider" | "claude";
+  model?: string;
+  task?: string;
+  access?: "read" | "write";
+  status: Status;
+  started?: string;
+  finished?: string;
+  secs?: number;
+  duration_ms?: number;
+  turns?: number;
+  error?: string;
+  tools: ToolCall[];       // motor claude: lo que leyó
+  notes: Note[];
+  result?: string;         // motor claude: texto final (.ai/logs/<run>.result.md)
+}
+
+/** Definición de un agente (agents/<id>.env + prompts/agents/<id>.md). */
+export interface AgentDef {
+  id: string;
+  name: string;
+  description: string;
+  engine: "aider" | "claude";
+  model: string;           // vacío = el del motor por defecto
+  access: "read" | "write";
+  verify: string;          // vacío | auto | comando
+  input: "" | "diff";
+  prompt: string;
+}
+
 export interface RunState {
   name: string;
   plan: { title: string; text: string; mtime?: number };   // mtime: para editar sin pisar cambios
@@ -72,6 +105,7 @@ export interface RunState {
   exec: Execution;
   review: Review;
   tokens: { executor: TokenStats | null; opus: OpusUsage | null };
+  agent: AgentRun | null;  // solo en ejecuciones de `ai agent`
   events: number;
   updated: number;         // epoch en segundos
 }
@@ -79,7 +113,7 @@ export interface RunState {
 export interface RunSummary {
   name: string;
   title: string;
-  stage: "analysis" | "exec" | "review";
+  stage: "analysis" | "exec" | "review" | "agent";
   status: Status;
   updated: number;
 }
@@ -175,7 +209,7 @@ export interface TokensState {
 }
 
 // --- Trabajos lanzados desde la web (Fase 3) ------------------------------------
-export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up";
+export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up" | "agent";
 
 /** Lo que envía la web para lanzar una acción (lo valida server/actions.ts). */
 export interface JobRequest {
@@ -186,6 +220,7 @@ export interface JobRequest {
   from?: number;           // exec: reanudar desde el paso N
   interactive?: boolean;   // exec -i
   model?: string;          // use
+  agent?: string;          // agent: id del agente
 }
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";

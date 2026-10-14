@@ -4,6 +4,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import { listAgents } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { RUN_NAME } from "./runs.ts";
 import type { JobAction, JobRequest } from "../shared/types.ts";
@@ -93,6 +94,13 @@ export function buildAction(req: JobRequest, cfg: Config, installedModels: strin
       // Solo modelos ya descargados: `ai use` descargaría uno nuevo (varios GB) sin preguntar.
       if (typeof req.model !== "string" || !installedModels.includes(req.model)) throw new ActionError("Ese modelo no está descargado.");
       return { action: "use", argv: ["use", req.model], label: `Cambiar ejecutor a ${req.model}`, interactive: false };
+    }
+    case "agent": {
+      const agent = listAgents(cfg).find((a) => a.id === req.agent);
+      if (!agent) throw new ActionError("Ese agente no existe.");
+      const project = resolveProject(req.project, cfg);
+      const task = cleanTask(req.task);
+      return { action: "agent", argv: ["agent", agent.id, project, task], label: `${agent.name}: ${short(task, 50)}`, project, interactive: false };
     }
     case "up":
       return { action: "up", argv: ["up"], label: "Encender (ai up)", interactive: false };

@@ -138,9 +138,33 @@ describe("paridad con lib/aiwatch.py (panel ligero)", () => {
       "import sys, json; sys.path.insert(0, sys.argv[1]); import aiwatch; print(json.dumps(aiwatch.run_state(sys.argv[2], sys.argv[3])))",
       join(import.meta.dirname, "../../lib"), dir, name], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } }));
     const ts = JSON.parse(JSON.stringify(runState(dir, name)));
-    for (const k of ["analysis", "exec", "review", "tokens", "events"]) {
+    for (const k of ["analysis", "exec", "review", "tokens", "agent", "events"]) {
       const strip = (o: Record<string, unknown>) => JSON.parse(JSON.stringify(o, (key, v) => (v === null ? undefined : v)));
       expect(strip(ts[k] ?? {}), k).toEqual(strip(py[k] ?? {}));
     }
+  });
+});
+
+describe("ejecuciones de agentes", () => {
+  it("agent_* + pasos: estado, título y resultado; paridad con Python", () => {
+    const run = "20261014-120000-tester-x";
+    writeFileSync(join(dir, ".ai/logs", run + ".jsonl"), [
+      ev("agent_started", { agent: "tester", label: "Tester", engine: "aider", model: "m", task: "tests de x", access: "write" }),
+      ev("exec_started", { mode: "agent", total: 2, from: 1 }), ev("step_started", { n: 1, title: "Tester: tests de x" }),
+      ev("step_done", { n: 1, secs: 5 }), ev("step_started", { n: 2, title: "Verificación: npm test" }), ev("step_failed", { n: 2 }),
+      ev("exec_failed"), ev("agent_failed", { error: "la verificación falló" }),
+    ].join("\n") + "\n");
+    writeFileSync(join(dir, ".ai/logs", run + ".result.md"), "ok");
+    const st = runState(dir, run);
+    expect(st.agent).toMatchObject({ agent: "tester", status: "failed", error: "la verificación falló", result: "ok" });
+    expect(st.plan.title).toBe("Tester: tests de x");
+    expect(st.exec.steps.map((s) => [s.n, s.status])).toEqual([[1, "done"], [2, "failed"]]);
+    expect(listRuns(dir).find((r) => r.name === run)).toMatchObject({ stage: "agent", status: "failed" });
+    const py = JSON.parse(execFileSync("python3", ["-c",
+      "import sys, json; sys.path.insert(0, sys.argv[1]); import aiwatch; print(json.dumps(aiwatch.run_state(sys.argv[2], sys.argv[3])))",
+      join(import.meta.dirname, "../../lib"), dir, run], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } }));
+    const strip = (o: unknown) => JSON.parse(JSON.stringify(o, (k, v) => (v === null ? undefined : v)));
+    for (const k of ["agent", "exec"] as const) expect(strip(JSON.parse(JSON.stringify(st))[k]), k).toEqual(strip(py[k]));
+    expect(py.plan.title).toBe(st.plan.title);
   });
 });

@@ -1,5 +1,5 @@
 // Vista de una sesión (un plan): etapas, análisis de Opus, pasos del ejecutor y revisión.
-import { ArrowRight, Brain, Coins, MessagesSquare, Pencil, Play, RotateCcw, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
+import { ArrowRight, Bot, Brain, Coins, MessagesSquare, Pencil, Play, RotateCcw, FileSearch, FileText, FolderSearch, GitBranch, GitCommitHorizontal, Hammer,
   MessageSquare, ScanSearch, Wrench } from "lucide-react";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import type { JobRequest, RunState, Status } from "../../../shared/types.ts";
@@ -231,5 +231,40 @@ export function SessionActions({ run, project, onAction }: { run: RunState; proj
         </button>
       )}
     </div>
+  );
+}
+
+/** Cabecera de una ejecución de `ai agent`: quién, con qué, qué leyó y qué respondió. */
+export function AgentRunCard({ run, onAction, project }: { run: RunState; project: string; onAction: (req: JobRequest) => void }) {
+  const a = run.agent!;
+  const items = [...a.tools.map((t) => ({ ts: t.ts, icon: TOOL_ICON[t.tool] ?? <Wrench className="size-3.5" />, text: `${t.tool} ${t.target}`, note: false })),
+    ...a.notes.map((n) => ({ ts: n.ts, icon: <MessageSquare className="size-3.5" />, text: n.text, note: true }))].sort((p, q) => (p.ts < q.ts ? -1 : 1));
+  const secs = a.secs ?? (a.duration_ms != null ? a.duration_ms / 1000 : a.status === "running" ? secondsSince(a.started) : null);
+  return (
+    <Card title={`Agente ${a.label ?? a.agent ?? ""}`} icon={<Bot className="size-4 text-muted" />} status={a.status}
+      actions={a.status !== "running" && a.agent && a.task && (
+        <button onClick={() => onAction({ action: "agent", agent: a.agent, project, task: a.task })}
+          className="flex items-center gap-1 text-xs text-accent hover:underline"><RotateCcw className="size-3" />repetir</button>
+      )}>
+      <dl className="mb-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+        <dt className="text-muted">Tarea</dt><dd className="break-words">{a.task}</dd>
+        <dt className="text-muted">Motor</dt><dd>{a.engine === "claude" ? "Claude Code (tu Mac, solo lectura)" : "Aider (contenedor)"} · {a.model}{a.access === "read" ? " · solo lectura" : ""}</dd>
+        {secs != null && <><dt className="text-muted">Duración</dt><dd>{duration(secs)}{a.turns ? ` · ${a.turns} turnos` : ""}</dd></>}
+      </dl>
+      {a.error && <p className="mb-2 text-xs break-words text-fail">{a.error}</p>}
+      {items.length > 0 && (
+        <ul className="mb-2 max-h-56 overflow-auto">
+          {items.map((i, k) => (
+            <li key={k} className="grid grid-cols-[18px_1fr_auto] items-baseline gap-2 border-b border-dashed border-line py-1 text-xs last:border-0">
+              <span className="self-center text-muted">{i.icon}</span>
+              <span className={cx("break-all", i.note ? "italic text-muted" : "font-mono")}>{i.text}</span>
+              <span className="text-muted tabular-nums">{clock(i.ts)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {a.result && <pre className="max-h-[28rem] overflow-auto rounded-lg bg-panel-2 p-3 font-mono text-xs whitespace-pre-wrap">{a.result}</pre>}
+      {a.engine === "aider" && !a.result && <p className="text-xs text-muted">Lo que hizo está en los pasos y su salida, a la derecha.</p>}
+    </Card>
   );
 }

@@ -13,6 +13,9 @@
 | Otra web o alguien de la red lee el panel | Una página maliciosa que consulta `127.0.0.1:8765` | El panel escucha solo en `127.0.0.1`, rechaza cualquier `Host` que no sea `127.0.0.1`/`localhost` (DNS rebinding), es de solo lectura (solo `GET`), solo sirve proyectos registrados en `run/projects` y nombres de plan sin rutas. Cabeceras CSP estrictas y sin CDNs. |
 | Otra web o app local usa el Studio | Una página en `localhost:3000` abre `ws://127.0.0.1:8766/ws` con tu cookie | Solo `127.0.0.1`; token aleatorio por arranque (`run/studio.token`, permisos 600) cambiado por cookie `HttpOnly` + `SameSite=Strict`; **Origin** obligatorio y permitido en WebSocket y en todo lo que no sea `GET` (SameSite no distingue puertos de localhost); **Host** permitido; CSP sin scripts en línea. |
 | La web lanza algo que no debe | Una petición a `/api/jobs` con `rm -rf` o un proyecto fuera de `~/Documents` | Lista cerrada de acciones con argumentos validados (`server/actions.ts`, con tests); sin shell (argv directo a node-pty); proyectos con `realpath` dentro de `PROJECTS_ROOT`; `down` no está permitido; POST/PUT exigen cookie + `Origin` permitido; auditoría en `logs/studio-audit.jsonl`. El contenedor del agente sigue con el mismo endurecimiento. |
+| Un agente edita tu Mac fuera del contenedor | Un agente con motor claude y permiso de escritura | Prohibido en `bin/ai` y en el Studio: `AGENT_ENGINE='claude'` exige `AGENT_ACCESS='read'` (solo Read/Glob/Grep). Los agentes que escriben usan siempre el contenedor. |
+| Un archivo de agente ejecuta código | Un `AGENT_NAME` con `'; rm -rf ~` escrito desde la web | `bin/ai` lee los `.env` de agentes con `sed`, **sin ejecutarlos**; el Studio valida y escribe valores sin comillas, `$`, `\`, `#` ni saltos de línea (tests en `server/agents.test.ts`). |
+| La verificación hace algo malo | Un `VERIFY_CMD` hostil en `.ai/project.env` de un repo ajeno | Se ejecuta solo dentro del contenedor endurecido (mismo aislamiento que Aider). Revisa ese archivo en repos de terceros. |
 | Dependencias npm comprometidas | Un paquete del Studio con código malicioso | Versiones exactas + `package-lock.json` y `npm ci`; instaladas con `--before` (sin versiones recién publicadas); npm 11 bloquea los scripts de instalación por defecto. Solo afecta al Studio, no a `bin/ai` ni al contenedor. |
 | Usar el medidor como puerta a Ollama | Una web que apunta a `127.0.0.1:11435` | El medidor escucha solo en `127.0.0.1`; como reescribe `Host` hacia Ollama, comprueba él mismo que `Host` sea `127.0.0.1`, `localhost` o `host.docker.internal` (DNS rebinding) y reenvía `Origin` para que Ollama siga aplicando su control. No guarda prompts ni respuestas: solo recuentos y tiempos. |
 | Telemetría y fugas | Envío de datos a terceros | `analytics-disable`, `check-update: false`, `LITELLM_LOCAL_MODEL_COST_MAP`. El modelo es 100% local. |
@@ -49,6 +52,8 @@
    El panel no cambia nada de `docker/compose.yml`.
 6. **Las imágenes de terceros son un riesgo de cadena de suministro.** La imagen de Aider
    está fijada a una versión (`AIDER_IMAGE`) para que no cambie sola. Actualízala a mano.
+   La imagen del ejecutor (`EXECUTOR_IMAGE`) se construye en local sobre ella y sobre la de
+   Node (`EXECUTOR_NODE_IMAGE`, versión fijada) con pytest de versión fijada.
 
 ## Identidad de git dentro del contenedor
 

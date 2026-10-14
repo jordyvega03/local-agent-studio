@@ -1,11 +1,11 @@
 # Contenedores del agente. Los lanza bin/ai con `docker compose run --rm`;
 # no hay servicios permanentes: cada ejecución crea y destruye su contenedor.
 #
-# Variables que inyecta bin/ai: PROJECT_DIR, AIDER_IMAGE, EXECUTOR_MEM_LIMIT,
+# Variables que inyecta bin/ai: PROJECT_DIR, EXECUTOR_IMAGE, EXECUTOR_MEM_LIMIT,
 # EXECUTOR_CPUS, OLLAMA_PORT, GIT_NAME, GIT_EMAIL.
 
 x-hardened: &hardened
-  image: ${AIDER_IMAGE}
+  image: ${EXECUTOR_IMAGE}          # Aider + Node + pytest (docker/executor/Dockerfile)
   user: "1000:1000"                 # usuario sin privilegios de la imagen
   read_only: true                   # sistema de archivos del contenedor inmutable
   cap_drop: [ALL]                   # sin capacidades de kernel

@@ -16,8 +16,9 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 - [ ] **Verificación automática por paso.** Ejecutar el comando de `**Verificación:**`
       de cada paso (en el mismo contenedor) y, si falla, reintentar el paso una vez
       pasando el error al modelo.
-- [ ] **Imagen propia del executor** con las toolchains de tus proyectos (Node, Python,
-      Java…), para que el agente pueda correr tests. Basada en `paulgauthier/aider`.
+- [ ] **Dependencias Linux para la verificación**: volumen propio por proyecto para
+      `node_modules` (y `.venv`) dentro del contenedor, para proyectos con dependencias
+      nativas de macOS. Hoy la verificación usa los `node_modules` del Mac.
 - [ ] **Interfaz gráfica.** Opción A: VS Code + Roo Code/Cline en un Dev Container, con el
       mismo Ollama y modos Plan (Opus) / Act (local). Opción B: Open WebUI en Docker,
       solo para chat.
@@ -36,6 +37,11 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 - [ ] Autocompletado zsh para `ai` (comandos y proyectos de `PROJECTS_ROOT`).
 
 ## Hecho
+
+- [x] 2026-10-14 — **AI Studio, Fase 4**: agentes con roles (`ai agent`, `agents/*.env`):
+      coder, tester, reviewer, docs; verificación automática en el contenedor; imagen propia
+      del ejecutor (Aider + Node + pytest, `ai build`); pestaña Agentes para crearlos y
+      editarlos. Cubre "Imagen propia del executor".
 
 - [x] 2026-10-14 — **AI Studio, Fase 3**: acciones desde la web (plan, exec, review, chat,
       modelo, up) con cola, terminal interactiva (node-pty + xterm.js), cancelación,

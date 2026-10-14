@@ -8,6 +8,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { loadConfig } from "./config.ts";
 import { ActionError, buildAction, resolveProject } from "./actions.ts";
+import { AgentError, listAgents, saveAgent, validateAgent } from "./agents.ts";
 import { Jobs } from "./jobs.ts";
 import { handleSocket } from "./live.ts";
 import { Metrics } from "./metrics.ts";
@@ -15,7 +16,7 @@ import { listProjects, MAX_PLAN_BYTES, registeredProjects, RUN_NAME, runState, s
 import { createToken, installSecurity } from "./security.ts";
 import { systemState } from "./system.ts";
 import { readTokens } from "./tokens.ts";
-import type { JobRequest } from "../shared/types.ts";
+import type { AgentDef, JobRequest } from "../shared/types.ts";
 
 const cfg = loadConfig();
 const token = createToken(cfg);
@@ -65,6 +66,25 @@ app.post("/api/jobs/:id/cancel", async (req, reply) => {
   const { id } = req.params as { id: string };
   return jobs.cancel(id) ? { ok: true } : reply.code(409).send({ error: "Ese trabajo ya no se puede cancelar." });
 });
+// Agentes: listar, crear y editar (agents/*.env + prompts/agents/*.md).
+app.get("/api/agents", async () => listAgents(cfg));
+const putAgent = (mode: "create" | "update") => async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
+  try {
+    const body = { ...(req.body as Partial<AgentDef>) };
+    if (mode === "update") body.id = (req.params as { id: string }).id;
+    const def = validateAgent(body, await installedModels());
+    saveAgent(cfg, def, mode);
+    appendFileSync(join(cfg.aiHome, "logs", "studio-audit.jsonl"),
+      JSON.stringify({ ts: new Date().toISOString(), event: mode === "create" ? "agent_created" : "agent_saved", agent: def.id, engine: def.engine, access: def.access }) + "\n");
+    return reply.code(mode === "create" ? 201 : 200).send(def);
+  } catch (err) {
+    if (err instanceof AgentError) return reply.code(400).send({ error: err.message });
+    throw err;
+  }
+};
+app.post("/api/agents", putAgent("create"));
+app.put("/api/agents/:id", putAgent("update"));
+
 app.put("/api/plan", async (req, reply) => {
   const { project, run, text, mtime } = (req.body ?? {}) as { project?: string; run?: string; text?: unknown; mtime?: unknown };
   try {

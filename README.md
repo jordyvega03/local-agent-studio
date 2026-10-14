@@ -12,6 +12,7 @@ ai up                                   # enciende (Docker + Ollama + modelo en 
 ai plan mi-app "agregar login con email"  # Opus escribe mi-app/.ai/plans/…md
 ai exec mi-app                          # el modelo local lo implementa en la rama ai/…
 ai review mi-app                        # Opus revisa el diff
+ai agent tester mi-app "tests para X"   # agentes con roles: coder, tester, reviewer, docs
 ai dashboard mi-app                     # panel web en vivo de los agentes
 ai studio mi-app                        # AI Studio: la interfaz React (en construcción)
 ai down                                 # apaga y libera ~14 GB de RAM
@@ -94,6 +95,38 @@ git switch main && git merge ai/<plan>   # si te gusta
 git branch -D ai/<plan>                  # si no
 ```
 
+### Agentes con roles
+
+```bash
+ai agent list                                   # los que hay en agents/*.env
+ai agent tester mi-app "tests de saludar(): normal y nombre vacío"
+ai agent coder mi-app "valida que el email no esté vacío en el registro"
+ai agent reviewer mi-app "céntrate en seguridad"
+ai agent docs mi-app "documenta el endpoint /tasks en el README"
+```
+
+| Agente | Motor | Qué hace |
+|---|---|---|
+| **coder** | modelo local, contenedor | Implementa una tarea pequeña sin plan previo y verifica |
+| **tester** | modelo local, contenedor | Escribe tests y ejecuta las comprobaciones del proyecto |
+| **reviewer** | Opus, solo lectura | Revisa el diff de la rama del agente con el foco que le digas |
+| **docs** | modelo local, contenedor | Actualiza README y documentación |
+
+- Los que escriben trabajan en el contenedor endurecido, en una rama `ai/…` (o en la rama
+  `ai/*` en la que estés, así el Tester prueba lo que hizo `ai exec`).
+- **Verificación** (`AGENT_VERIFY='auto'`): tras el agente se ejecuta en el contenedor el
+  comando de comprobación del proyecto: `npm test` si hay script `test`, si no
+  `npm run typecheck` (también en `apps/*` y `packages/*`), y `pytest` si hay
+  `pytest.ini`/`conftest.py`. Para fijarlo: `mi-app/.ai/project.env` con
+  `VERIFY_CMD='npm run lint && npm test'`. Usa los `node_modules` del proyecto tal cual
+  (no instala nada: instalar en Linux rompería los de tu Mac).
+- Un agente con motor **claude** (Opus) corre en tu Mac, fuera del contenedor: por eso
+  **solo puede ser de lectura**.
+- Crea los tuyos en el Studio (pestaña **Agentes**) o a mano: formato en `agents/README.md`.
+
+La imagen del contenedor es la de Aider + Node 22 + pytest (`docker/executor/Dockerfile`).
+`ai up` la construye si falta; `ai build` la reconstruye.
+
 ### Ver a los agentes trabajar (panel web)
 
 ```bash
@@ -154,7 +187,11 @@ La nueva interfaz del plan [`docs/PLAN-STUDIO.md`](docs/PLAN-STUDIO.md). Cuatro 
 Lo lanzado desde la web queda registrado igual que desde la terminal. Si paras el Studio
 (`ai studio stop`, `--rebuild` o `ai down`) con un trabajo en marcha, recibe Ctrl+C.
 
-Próxima fase: agentes con roles (coder, tester, reviewer) y flujos.
+- **Agentes** (Fase 4): ver, crear y editar agentes y lanzarlos ("Usar"). Una ejecución de
+  agente aparece en Sesión con su tarjeta (motor, tarea, lo que leyó o respondió), sus
+  pasos (agente + verificación), su salida y sus tokens.
+
+Próxima fase: flujos multiagente (planner → coder → tester → reviewer) con aprobaciones.
 
 ### Medidor de tokens
 
@@ -191,6 +228,8 @@ ai down --all    # además cierra Docker Desktop (libera también su VM)
 | `ai dashboard [proy]` / `ai dashboard stop` | Panel web en vivo (127.0.0.1) / detenerlo |
 | `ai studio [proy]` / `ai studio stop` / `--rebuild` | AI Studio (React, con token) / detener / recompilar |
 | `ai architect <proy>` | Aider architect: Opus + local en un solo chat (requiere `ANTHROPIC_API_KEY`) |
+| `ai agent list` / `ai agent <id> <proy> "tarea"` | Agentes con roles (`agents/*.env`) |
+| `ai build` | (Re)construye la imagen del ejecutor (Aider + Node + pytest) |
 | `ai models` / `ai pull X` / `ai rm X` | Gestión de modelos |
 | `ai use <modelo>` | Cambia el ejecutor en `config.env` |
 | `ai logs` | Log de Ollama en vivo |
@@ -207,7 +246,10 @@ agents/
 │   └── aider/
 │       ├── aider.conf.yml       # config de Aider (montada solo lectura)
 │       └── model-settings.yml   # ajustes por modelo (num_ctx, edit_format)
+├── agents/*.env                 # agentes con roles (formato en agents/README.md)
 ├── prompts/planner.md           # instrucciones que recibe Opus para planificar
+├── prompts/agents/*.md          # instrucciones de cada agente
+├── docker/executor/Dockerfile   # imagen del ejecutor: Aider + Node + pytest
 ├── lib/aiwatch.py               # eventos, análisis en vivo y servidor del panel
 ├── dashboard/index.html         # panel web (sin dependencias externas)
 ├── studio/                      # AI Studio: server/ (Fastify), ui/ (React), shared/ (tipos)

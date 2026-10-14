@@ -18,3 +18,8 @@ export const cancelJob = (id: string) => call<{ ok: true }>("POST", `/api/jobs/$
 export const savePlan = (project: string, run: string, text: string, mtime: number) =>
   call<{ mtime: number }>("PUT", "/api/plan", { project, run, text, mtime });
 export const getModels = () => call<{ installed: string[]; executor: string }>("GET", "/api/models");
+
+export const getAgents = () => call<import("../../shared/types.ts").AgentDef[]>("GET", "/api/agents");
+export const createAgent = (def: import("../../shared/types.ts").AgentDef) => call("POST", "/api/agents", def);
+export const updateAgent = (def: import("../../shared/types.ts").AgentDef) =>
+  call("PUT", `/api/agents/${encodeURIComponent(def.id)}`, def);

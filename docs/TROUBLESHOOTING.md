@@ -109,6 +109,17 @@ y `ai studio --rebuild`.
 ### AI Studio: "El proyecto debe estar dentro de …"
 Las acciones solo se lanzan sobre carpetas dentro de `PROJECTS_ROOT` (`config.env`).
 
+### Un agente dice "No se detectó cómo comprobar el proyecto"
+Crea `mi-app/.ai/project.env` con el comando, p. ej. `VERIFY_CMD='npm --prefix apps/web run typecheck'`.
+
+### La verificación falla en el contenedor pero en mi Mac pasa
+Se usan los `node_modules` de tu Mac. Si el proyecto tiene dependencias nativas (esbuild,
+sharp, bcrypt…), sus binarios son de macOS y fallan en Linux. Usa un `VERIFY_CMD` que no
+las necesite (p. ej. `tsc --noEmit`) o deja la verificación vacía para ese agente.
+
+### `ai up` construye una imagen la primera vez
+Es la imagen del ejecutor (Aider + Node + pytest), unos 30-60 s. `ai build` la reconstruye.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama

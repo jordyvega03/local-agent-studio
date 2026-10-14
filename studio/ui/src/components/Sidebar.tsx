@@ -3,7 +3,7 @@ import type { Project } from "../../../shared/types.ts";
 import { ago, STATUS_LABEL } from "../format.ts";
 import { cx, DOT } from "./ui.tsx";
 
-const STAGE = { analysis: "análisis", exec: "ejecución", review: "revisión" } as const;
+const STAGE = { analysis: "análisis", exec: "ejecución", review: "revisión", agent: "agente" } as const;
 
 export function Sidebar({ projects, project, run, onSelect }: {
   projects: Project[]; project: string; run: string;

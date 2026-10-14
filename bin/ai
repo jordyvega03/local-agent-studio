@@ -74,7 +74,7 @@ assert_safe_mount() {
 
 compose() {
   PROJECT_DIR="${PROJECT_DIR:-$AI_HOME/run}" \
-  AIDER_IMAGE="$AIDER_IMAGE" EXECUTOR_MEM_LIMIT="$EXECUTOR_MEM_LIMIT" \
+  EXECUTOR_IMAGE="$EXECUTOR_IMAGE" EXECUTOR_MEM_LIMIT="$EXECUTOR_MEM_LIMIT" \
   EXECUTOR_CPUS="$EXECUTOR_CPUS" OLLAMA_PORT="$(executor_ollama_port)" \
   GIT_NAME="$(git config --global user.name || echo ai-agent)" \
   GIT_EMAIL="$(git config --global user.email || echo ai-agent@localhost)" \
@@ -97,6 +97,24 @@ run_logged() {  # run_logged <log> <servicio> <project_dir> <args aider...>
     script -q -t 1 "$log" "$AI_HOME/bin/ai" _container "$@"
   else
     run_container "$@" 2>&1 | tee "$log"
+  fi
+}
+
+# Comprobación (tests/typecheck) dentro del mismo contenedor endurecido, con un shell.
+run_verify() {  # run_verify <project_dir> <comando>
+  assert_safe_mount "$1"
+  local tty_flag=""
+  [ -t 0 ] && [ -t 1 ] || tty_flag="-T"
+  # Sin __pycache__ ni .pyc en el proyecto por ejecutar las comprobaciones.
+  PROJECT_DIR="$1" compose run --rm $tty_flag -e PYTHONDONTWRITEBYTECODE=1 --entrypoint /bin/sh executor -c "$2"
+}
+
+run_logged_verify() {  # run_logged_verify <log> <project_dir> <comando>
+  local log="$1"; shift
+  if [ -t 0 ] && [ -t 1 ]; then
+    script -q -t 1 "$log" "$AI_HOME/bin/ai" _verify "$@"
+  else
+    run_verify "$@" 2>&1 | tee "$log"
   fi
 }
 
@@ -214,7 +232,7 @@ cmd_up() {
   local warm=1
   [ "${1:-}" = "--no-warm" ] && warm=0
   ensure_docker
-  docker image inspect "$AIDER_IMAGE" >/dev/null 2>&1 || { info "Descargando imagen ${AIDER_IMAGE}…"; docker pull "$AIDER_IMAGE"; }
+  docker image inspect "$EXECUTOR_IMAGE" >/dev/null 2>&1 || cmd_build
   start_ollama
   start_meter
   if ! model_installed "$EXECUTOR_MODEL"; then
@@ -223,6 +241,17 @@ cmd_up() {
   fi
   [ "$warm" = 1 ] && warm_model
   echo; cmd_status
+}
+
+# Construye la imagen del ejecutor (Aider + Node + pytest). Versiones en config.env.
+cmd_build() {
+  ensure_docker
+  info "Construyendo $EXECUTOR_IMAGE (base $AIDER_IMAGE + $EXECUTOR_NODE_IMAGE + pytest $EXECUTOR_PYTEST_VERSION)…"
+  docker build -t "$EXECUTOR_IMAGE" \
+    --build-arg AIDER_IMAGE="$AIDER_IMAGE" --build-arg NODE_IMAGE="$EXECUTOR_NODE_IMAGE" \
+    --build-arg PYTEST_VERSION="$EXECUTOR_PYTEST_VERSION" \
+    "$AI_HOME/docker/executor" || die "Falló la construcción de la imagen del ejecutor."
+  ok "Imagen lista: $EXECUTOR_IMAGE"
 }
 
 cmd_down() {
@@ -467,6 +496,126 @@ cmd_review() {
   fi
 }
 
+# --- Agentes (agents/*.env + prompts/agents/*.md) ----------------------------
+# Lee CLAVE='valor' de un agente SIN ejecutar el archivo (el Studio también los escribe).
+agent_field() {  # agent_field <archivo> <CLAVE>
+  sed -n -E "s/^$2=['\"]?([^'\"]*)['\"]?[[:space:]]*(#.*)?\$/\1/p" "$1" | head -1
+}
+
+list_agents() {
+  local f n
+  echo "${c_dim}Agentes (agents/*.env):${c_off}"
+  for f in "$AI_HOME"/agents/*.env; do
+    [ -f "$f" ] || continue
+    n="$(basename "$f" .env)"
+    printf "  %-10s %-8s %-6s %s\n" "$n" "$(agent_field "$f" AGENT_ENGINE)" "$(agent_field "$f" AGENT_ACCESS)" "$(agent_field "$f" AGENT_DESCRIPTION)"
+  done
+  echo "Uso: ai agent <nombre> <proyecto> \"tarea\""
+}
+
+cmd_agent() {
+  local name="${1:-list}"
+  case "$name" in list|ls) list_agents; return ;; esac
+  case "$name" in ""|*[!a-z0-9-]*) die "Nombre de agente no válido: $name" ;; esac
+  local file="$AI_HOME/agents/$name.env" prompt="$AI_HOME/prompts/agents/$name.md"
+  [ -f "$file" ] || die "No existe el agente '$name'. Mira: ai agent list"
+  [ -f "$prompt" ] || die "Falta el prompt del agente: prompts/agents/$name.md"
+  shift
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  local task="$*"
+  [ -n "$task" ] || die "Falta la tarea. Ej: ai agent $name mi-app \"añadir tests para saludar()\""
+
+  local label engine model access verify input
+  label="$(agent_field "$file" AGENT_NAME)"; label="${label:-$name}"
+  engine="$(agent_field "$file" AGENT_ENGINE)"
+  model="$(agent_field "$file" AGENT_MODEL)"
+  access="$(agent_field "$file" AGENT_ACCESS)"
+  verify="$(agent_field "$file" AGENT_VERIFY)"
+  input="$(agent_field "$file" AGENT_INPUT)"
+  case "$engine" in aider|claude) ;; *) die "AGENT_ENGINE debe ser aider o claude (en agents/$name.env)" ;; esac
+  case "$access" in read|write) ;; *) die "AGENT_ACCESS debe ser read o write (en agents/$name.env)" ;; esac
+  # Claude Code corre en tu Mac, fuera del contenedor: nunca puede escribir.
+  [ "$engine" = claude ] && [ "$access" != read ] && die "Un agente con motor claude solo puede ser de lectura (AGENT_ACCESS='read')."
+  if [ -z "$model" ]; then
+    if [ "$engine" = aider ]; then model="$EXECUTOR_MODEL"; else model="$PLANNER_MODEL"; fi
+  fi
+
+  # Comprobación: solo para agentes que escriben código (corre en el contenedor).
+  local vcmd=""
+  if [ "$engine" = aider ] && [ -n "$verify" ]; then
+    if [ "$verify" = auto ]; then vcmd="$(python3 "$AIWATCH" detect-verify "$dir" 2>/dev/null || true)"; else vcmd="$verify"; fi
+  fi
+
+  local slug; slug="$(echo "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-30 | sed 's/-$//')"
+  local run="$(date +%Y%m%d-%H%M%S)-$name-$slug"
+  mkdir -p "$dir/.ai"
+  init_run_log "$dir" "$run"
+  AGENT_STATE=running
+  trap 'meter_context; if [ "$AGENT_STATE" = running ]; then ai_event agent_failed error=interrumpido; ai_event exec_aborted; fi' EXIT
+  ai_event agent_started agent="$name" label="$label" engine="$engine" model="$model" task="$task" access="$access"
+  info "Agente ${label} (${engine} · ${model}) en $(basename "$dir")…"
+  local t0; t0="$(date +%s)"
+
+  if [ "$engine" = claude ]; then
+    command -v claude >/dev/null || die "Claude Code no está instalado."
+    local base=""; [ "$input" = diff ] && base="$(git -C "$dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null || echo main)"
+    if (cd "$dir" && { if [ -n "$base" ]; then git diff "$base...HEAD"; fi; } | claude -p "$(cat "$prompt")
+
+TAREA: $task" --model "$model" --output-format stream-json --verbose \
+        --allowedTools "Read" "Glob" "Grep" \
+        --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
+        | python3 "$AIWATCH" plan-stream "$EVENT_LOG" "$dir/.ai/logs/$run.result.md" agent); then
+      AGENT_STATE=done; ok "Resultado: .ai/logs/$run.result.md"; return 0
+    fi
+    AGENT_STATE=failed; die "El agente no devolvió nada."
+  fi
+
+  # Motor aider: en el contenedor; si escribe, en su propia rama (o la ai/* actual).
+  cmd_up --no-warm >/dev/null
+  [ "$access" = write ] && prepare_git "$dir" "$run"
+  local branch; branch="$(git -C "$dir" branch --show-current 2>/dev/null || true)"
+  local total=1; [ -n "$vcmd" ] && total=2
+  ai_event exec_started mode=agent model="$model" branch="$branch" total="$total" from=1
+  local before; before="$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)"
+  local slog="$dir/.ai/logs/$run.step-001.log"
+  ai_event step_started n=1 title="$label: $task"
+  meter_context project="$dir" run="$run" step=1 agent="$name"
+  local dry=""; [ "$access" = read ] && dry="--dry-run"
+  # shellcheck disable=SC2086
+  if run_logged "$slog" executor "$dir" --model "ollama_chat/$model" --yes-always --no-suggest-shell-commands $dry \
+      --message "$(cat "$prompt")
+
+TAREA:
+$task"; then
+    ai_event step_done n=1 secs="$(( $(date +%s) - t0 ))" \
+      commits="$(git -C "$dir" log --format='%h %s' "${before:+$before..}HEAD" 2>/dev/null || true)"
+  else
+    ai_event step_failed n=1 secs="$(( $(date +%s) - t0 ))"
+    ai_event exec_failed n=1; ai_event agent_failed error="el agente falló"
+    AGENT_STATE=failed; die "Falló el agente $label."
+  fi
+  meter_context
+
+  if [ -n "$vcmd" ]; then
+    echo; echo "${c_blue}━━━ Verificación ━━━${c_off}  $vcmd"
+    local t1; t1="$(date +%s)"
+    ai_event step_started n=2 title="Verificación: $vcmd"
+    if run_logged_verify "$dir/.ai/logs/$run.step-002.log" "$dir" "$vcmd"; then
+      ai_event step_done n=2 secs="$(( $(date +%s) - t1 ))"
+    else
+      ai_event step_failed n=2 secs="$(( $(date +%s) - t1 ))"
+      ai_event exec_failed n=2; ai_event agent_failed error="la verificación falló: $vcmd"
+      AGENT_STATE=failed; die "La verificación falló ($vcmd). Revisa la salida de arriba."
+    fi
+  elif [ "$engine" = aider ] && [ -n "$verify" ]; then
+    warn "No se detectó cómo comprobar el proyecto. Fíjalo en $dir/.ai/project.env: VERIFY_CMD='npm test'"
+  fi
+  ai_event exec_done
+  ai_event agent_done secs="$(( $(date +%s) - t0 ))"
+  AGENT_STATE=done
+  ok "Agente $label terminado."
+}
+
 # --- Panel web ---------------------------------------------------------------
 dashboard_running() { [ -f "$DASH_PID_FILE" ] && kill -0 "$(cat "$DASH_PID_FILE")" 2>/dev/null; }
 
@@ -593,6 +742,7 @@ ${c_dim}Ciclo de vida${c_off}
   ai down               Descarga el modelo y detiene Ollama (libera la RAM)
   ai down --all         Además cierra Docker Desktop
   ai status             Estado, modelos cargados y memoria
+  ai build              (Re)construye la imagen del ejecutor (Aider + Node + pytest)
 
 ${c_dim}Trabajo${c_off}
   ai plan <proyecto> "tarea"     Opus analiza (solo lectura) y escribe .ai/plans/*.md
@@ -600,6 +750,8 @@ ${c_dim}Trabajo${c_off}
          [-i]                    …o en chat interactivo con el plan cargado
          [--from N]              …reanudando desde el paso N
   ai review <proyecto>           Opus revisa el diff que hizo el agente
+  ai agent list                  Agentes disponibles (agents/*.env)
+  ai agent <nombre> <proy> "t"   Lanza un agente (coder, tester, reviewer, docs…)
   ai chat <proyecto>             Chat libre con el modelo local (Aider)
   ai dashboard [proyecto]        Panel web en vivo de los agentes (127.0.0.1)
   ai dashboard stop              Detiene el panel
@@ -627,6 +779,7 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   up)        cmd_up "$@" ;;
   down|stop) cmd_down "$@" ;;
+  build)     cmd_build ;;
   status|st) cmd_status ;;
   plan)      cmd_plan "$@" ;;
   exec|run)  cmd_exec "$@" ;;
@@ -634,6 +787,8 @@ case "$cmd" in
   studio)    cmd_studio "$@" ;;
   _container) run_container "$@" ;;   # interno: lo usa run_logged vía script(1)
   review)    cmd_review "$@" ;;
+  agent)     cmd_agent "$@" ;;
+  _verify)   run_verify "$@" ;;    # interno: lo usa run_logged_verify vía script(1)
   chat)      cmd_chat "$@" ;;
   architect) cmd_architect "$@" ;;
   models)    ollama_running || start_ollama >/dev/null; OLLAMA_HOST="$OLLAMA_HOST" ollama list ;;

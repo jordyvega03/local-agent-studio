@@ -6,9 +6,13 @@ Solo usa la librería estándar de Python 3 (la de macOS sirve). La invoca bin/a
   aiwatch.py event <log.jsonl> <tipo> [clave=valor ...]
       Añade un evento (una línea JSON) al registro de un plan.
 
-  aiwatch.py plan-stream <log.jsonl> <plan.md>
+  aiwatch.py plan-stream <log.jsonl> <salida.md> [prefijo]
       Lee `claude -p --output-format stream-json --verbose` por stdin, muestra en la
-      terminal qué archivos lee Opus, registra cada herramienta y guarda el plan final.
+      terminal qué archivos lee Opus, registra cada herramienta y guarda el texto final.
+      prefijo = plan (por defecto, `ai plan`) o agent (agentes con motor claude).
+
+  aiwatch.py detect-verify <proyecto>
+      Imprime el comando de comprobación del proyecto (tests, o si no typecheck), o nada.
 
   aiwatch.py review-out <log.jsonl> <salida.md>
       Lee `claude -p --output-format json` de `ai review`: imprime la revisión, la guarda
@@ -28,7 +32,9 @@ Formato de los registros: proyecto/.ai/logs/<plan>.jsonl, un objeto por línea c
 "ts" (ISO 8601), "type" y campos libres. Tipos: plan_started, plan_tool, plan_note,
 plan_done, plan_failed, plan_aborted, exec_started, step_started, step_done,
 step_failed, exec_done, exec_failed, exec_aborted, review_started, review_done,
-review_failed.
+review_failed, agent_started, agent_tool, agent_note, agent_done, agent_failed.
+Una ejecución de `ai agent` reutiliza exec_*/step_* para sus pasos (1 = el agente,
+2 = la verificación) y añade agent_* con los datos del agente.
 """
 import glob
 import http.client
@@ -130,6 +136,61 @@ def cmd_review_out(args):
     return 0
 
 
+def read_env_value(path, key):
+    """Lee CLAVE='valor' de un archivo tipo config.env sin ejecutarlo."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(rf"^{key}=['\"]?([^'\"]*)['\"]?\s*(#.*)?$", line.strip())
+                if m:
+                    return m.group(1).strip()
+    except OSError:
+        pass
+    return None
+
+
+def detect_verify(pdir):
+    """Comando de comprobación: VERIFY_CMD de .ai/project.env, o el detectado (tests > typecheck)."""
+    override = read_env_value(os.path.join(pdir, ".ai", "project.env"), "VERIFY_CMD")
+    if override is not None:
+        return override
+    cmds = []
+
+    def node(pkg_dir):
+        try:
+            with open(os.path.join(pkg_dir, "package.json"), encoding="utf-8") as f:
+                scripts = json.load(f).get("scripts") or {}
+        except (OSError, ValueError):
+            return None
+        rel = os.path.relpath(pkg_dir, pdir)
+        npm = "npm" if rel == "." else f"npm --prefix {rel}"
+        test = scripts.get("test", "")
+        if test and "no test specified" not in test:
+            return f"{npm} test"
+        for name in ("typecheck", "type-check"):
+            if name in scripts:
+                return f"{npm} run {name}"
+        return None
+
+    root = node(pdir)
+    if root:
+        cmds.append(root)
+    else:
+        for sub in sorted(glob.glob(os.path.join(pdir, "apps", "*")) + glob.glob(os.path.join(pdir, "packages", "*"))):
+            c = node(sub)
+            if c:
+                cmds.append(c)
+    if any(os.path.exists(os.path.join(pdir, f)) for f in ("pytest.ini", "conftest.py")) or \
+            (os.path.exists(os.path.join(pdir, "pyproject.toml")) and os.path.isdir(os.path.join(pdir, "tests"))):
+        cmds.append("python3 -m pytest -q")
+    return " && ".join(cmds)
+
+
+def cmd_detect_verify(args):
+    print(detect_verify(args[0]))
+    return 0
+
+
 def cmd_context(args):
     path = args[0]
     if len(args) == 1:
@@ -155,6 +216,7 @@ def write_json_atomic(path, data):
 
 def cmd_plan_stream(args):
     log, plan = args[0], args[1]
+    prefix = args[2] if len(args) > 2 and args[2] in ("plan", "agent") else "plan"
     cwd = os.getcwd()
     result, error, meta = None, None, {}
     for line in sys.stdin:
@@ -173,12 +235,12 @@ def cmd_plan_stream(args):
                     name = block.get("name", "?")
                     target = tool_target(name, block.get("input") or {}, cwd)
                     say(f"  {ICONS.get(name, '🔧')} {name} {DIM}{target}{OFF}")
-                    append_event(log, "plan_tool", tool=name, target=target)
+                    append_event(log, f"{prefix}_tool", tool=name, target=target)
                 elif block.get("type") == "text":
                     text = (block.get("text") or "").strip()
                     if text and len(text) <= 400:  # el plan final es largo: no es una nota
                         say(f"  {DIM}💬 {text}{OFF}")
-                        append_event(log, "plan_note", text=text)
+                        append_event(log, f"{prefix}_note", text=text)
         elif mtype == "result":
             meta = {"turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms"), **usage_fields(msg)}
             if msg.get("is_error") or msg.get("subtype") != "success":
@@ -189,10 +251,10 @@ def cmd_plan_stream(args):
     if result and result.strip():
         with open(plan, "w", encoding="utf-8") as f:
             f.write(result.rstrip() + "\n")
-        append_event(log, "plan_done", file=relpath(plan, cwd), **meta)
+        append_event(log, f"{prefix}_done", file=relpath(plan, cwd), **meta)
         return 0
     error = str(error or "el planificador no devolvió nada")[:500]
-    append_event(log, "plan_failed", error=error, **meta)
+    append_event(log, f"{prefix}_failed", error=error, **meta)
     say(f"{RED}✗{OFF} {error}")
     return 1
 
@@ -470,6 +532,7 @@ def run_state(pdir, name):
     execu = {"status": "pending", "steps": plan.pop("steps")}
     review = {"status": "pending"}
     opus = {}
+    agent = None
     steps = {s["n"]: s for s in execu["steps"]}
 
     def step(n):
@@ -521,6 +584,23 @@ def run_state(pdir, name):
             for s in execu["steps"]:
                 if s["status"] == "running":
                     s["status"] = "aborted"
+        elif t == "agent_started":
+            agent = {"status": "running", "started": ts, "tools": [], "notes": [],
+                     **{k: ev.get(k) for k in ("agent", "label", "engine", "model", "task", "access") if ev.get(k) is not None}}
+        elif t == "agent_tool" and agent is not None:
+            agent["tools"].append({"ts": ts, "tool": ev.get("tool"), "target": ev.get("target")})
+        elif t == "agent_note" and agent is not None:
+            agent["notes"].append({"ts": ts, "text": ev.get("text")})
+        elif t == "agent_done" and agent is not None:
+            agent.update(status="done", finished=ts)
+            for k in ("secs", "duration_ms", "turns"):
+                if ev.get(k) is not None:
+                    agent[k] = ev[k]
+            for k in OPUS_FIELDS:
+                if ev.get(k) is not None:
+                    opus[k] = opus.get(k, 0) + ev[k]
+        elif t == "agent_failed" and agent is not None:
+            agent.update(status="failed", finished=ts, error=ev.get("error") or "falló")
         elif t == "review_started":
             review.update(status="running", started=ts)
         elif t == "review_done":
@@ -548,8 +628,16 @@ def run_state(pdir, name):
         if mine:
             s["tokens"] = token_stats(mine)
     tokens = {"executor": token_stats(tok) if tok else None, "opus": opus or None}
+    if agent is not None:
+        try:
+            with open(os.path.join(logs, name + ".result.md"), encoding="utf-8") as f:
+                agent["result"] = f.read()
+        except OSError:
+            pass
+        if not plan["title"]:
+            plan["title"] = f"{agent.get('label') or agent.get('agent')}: {agent.get('task', '')}"[:120]
     return {"name": name, "plan": plan, "analysis": analysis, "exec": execu, "review": review,
-            "tokens": tokens, "events": len(events), "updated": run_mtime(pdir, name)}
+            "tokens": tokens, "agent": agent, "events": len(events), "updated": run_mtime(pdir, name)}
 
 
 def run_mtime(pdir, name):
@@ -560,6 +648,9 @@ def run_mtime(pdir, name):
 
 def run_summary(pdir, name):
     st = run_state(pdir, name)
+    if st.get("agent"):
+        return {"name": name, "title": st["plan"]["title"] or name, "stage": "agent",
+                "status": st["agent"]["status"], "updated": st["updated"]}
     stage, status = "analysis", st["analysis"]["status"]
     if st["exec"]["status"] != "pending":
         stage, status = "exec", st["exec"]["status"]
@@ -790,7 +881,8 @@ def cmd_serve(args):
 
 def main(argv):
     commands = {"event": (cmd_event, 2), "plan-stream": (cmd_plan_stream, 2), "review-out": (cmd_review_out, 2),
-                "context": (cmd_context, 1), "meter": (cmd_meter, 3), "serve": (cmd_serve, 2)}
+                "context": (cmd_context, 1), "meter": (cmd_meter, 3), "serve": (cmd_serve, 2),
+                "detect-verify": (cmd_detect_verify, 1)}
     if len(argv) < 1 or argv[0] not in commands or len(argv) - 1 < commands[argv[0]][1]:
         sys.stderr.write(__doc__)
         return 2

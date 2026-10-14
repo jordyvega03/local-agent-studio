@@ -184,6 +184,27 @@ navegador ──POST /api/jobs {action, project, …}──► actions.ts (lista
 - **Editor de planes:** CodeMirror 6 (cargado bajo demanda). `PUT /api/plan` escribe de forma
   atómica y responde 409 si el archivo cambió desde que lo abriste (`mtime`).
 
+## Agentes (Fase 4)
+
+```
+agents/<id>.env ─┐  bin/ai cmd_agent (lee CLAVE='valor' con sed, sin ejecutar el archivo)
+prompts/agents/  ┘        │
+                          ├─ motor aider ─► contenedor: paso 1 = agente (Aider --message prompt+tarea)
+                          │                             paso 2 = verificación (sh -c "$VERIFY")
+                          └─ motor claude ► Claude Code en el Mac, solo Read/Glob/Grep
+                                            (con AGENT_INPUT='diff' recibe el diff por stdin)
+```
+
+- Una ejecución de agente es una "sesión" más: `.ai/logs/<fecha>-<agente>-<tarea>.*`, con
+  `agent_started/agent_done/agent_failed` + los `exec_*/step_*` de sus pasos. `run_state()`
+  y `runState()` devuelven `agent`, y el título de la sesión es `Agente: tarea`.
+- Verificación: `aiwatch.py detect-verify` (o `VERIFY_CMD` de `.ai/project.env`), ejecutada
+  con `run_verify`: el mismo servicio endurecido con `--entrypoint /bin/sh`.
+- Imagen: `docker/executor/Dockerfile` copia el binario de Node de la imagen oficial
+  (`EXECUTOR_NODE_IMAGE`) sobre `AIDER_IMAGE` e instala pytest; etiqueta `EXECUTOR_IMAGE`.
+- El Studio lista/crea/edita agentes (`server/agents.ts`): valida cada campo y escribe el
+  `.env` con comillas simples y valores sin comillas, `$`, `\`, `#` ni saltos de línea.
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |
@@ -193,6 +214,8 @@ navegador ──POST /api/jobs {action, project, …}──► actions.ts (lista
 | `.ai/logs/<plan>.step-NNN.log` | Terminal grabada de cada paso de Aider | No |
 | `.ai/logs/<plan>.review.md` | Salida de `ai review` | No |
 | `.ai/logs/<plan>.tokens.jsonl` | Peticiones del medidor de ese plan | No |
+| `.ai/logs/<run>.result.md` | Respuesta de un agente con motor claude | No |
+| `.ai/project.env` | `VERIFY_CMD` del proyecto (opcional, lo escribes tú) | Sí, si quieres compartirlo |
 | `.aider.chat.history.md`, `.aider.input.history`, `.aider.tags.cache.*` | Estado de Aider | No (Aider los añade a `.gitignore`) |
 
 ## Puntos de extensión
@@ -204,5 +227,7 @@ navegador ──POST /api/jobs {action, project, …}──► actions.ts (lista
 | Ajustar Aider | `docker/aider/aider.conf.yml` |
 | Añadir un modelo nuevo | `ai use <modelo>` + un bloque en `docker/aider/model-settings.yml` |
 | Más endurecimiento del contenedor | `docker/compose.yml` (ancla `x-hardened`) |
+| Un agente nuevo | Studio → Agentes, o `agents/<id>.env` + `prompts/agents/<id>.md` |
+| Otra toolchain en el contenedor (Java, Go…) | `docker/executor/Dockerfile` + subir la etiqueta de `EXECUTOR_IMAGE` |
 | Un comando nuevo | `bin/ai`: función `cmd_<nombre>` + entrada en el `case` final + `cmd_help` |
 | Registrar algo nuevo en el panel | `ai_event <tipo> clave=valor` en `bin/ai` + `run_state()` en `lib/aiwatch.py` + `dashboard/index.html` |

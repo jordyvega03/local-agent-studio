@@ -16,6 +16,8 @@ export function TerminalCard({ ref, step, status, following }: {
   const box = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
   const empty = useRef(true);
+  // useImperativeHandle se expone antes de que el efecto cree xterm: lo que llegue antes, en cola.
+  const queue = useRef<{ reset: boolean; bytes: Uint8Array }[]>([]);
 
   useEffect(() => {
     const css = getComputedStyle(document.documentElement);
@@ -34,16 +36,24 @@ export function TerminalCard({ ref, step, status, following }: {
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(box.current!);
     term.current = t;
-    return () => { ro.disconnect(); t.dispose(); };
+    for (const q of queue.current) write(t, q.reset, q.bytes);
+    queue.current = [];
+    return () => { ro.disconnect(); t.dispose(); term.current = null; };
   }, []);
+
+  const write = (t: XTerm, reset: boolean, bytes: Uint8Array) => {
+    if (reset) { t.reset(); empty.current = true; }
+    if (bytes.length) { t.write(bytes); empty.current = false; }
+    else if (reset) t.write("\x1b[2mSin salida para este paso todavía.\x1b[0m");
+  };
 
   useImperativeHandle(ref, () => ({
     write(reset, bytes) {
-      const t = term.current;
-      if (!t) return;
-      if (reset) { t.reset(); empty.current = true; }
-      if (bytes.length) { t.write(bytes); empty.current = false; }
-      else if (reset) t.write("\x1b[2mSin salida para este paso todavía.\x1b[0m");
+      if (term.current) write(term.current, reset, bytes);
+      else {
+        if (reset) queue.current = [];
+        queue.current.push({ reset, bytes });
+      }
     },
   }), []);
 

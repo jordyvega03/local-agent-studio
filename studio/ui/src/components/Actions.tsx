@@ -3,16 +3,17 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Ban, Brain, CircleCheck, CircleX, Clock, Cpu, Hammer, Loader2, MessagesSquare, Play, Power, ScanSearch,
+import { Ban, Bot, Brain, CircleCheck, CircleX, Clock, Cpu, Hammer, Loader2, MessagesSquare, Play, Power, ScanSearch,
   SquareTerminal } from "lucide-react";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
-import type { JobAction, JobRequest, JobStatus, JobSummary, Project } from "../../../shared/types.ts";
-import { getModels } from "../api.ts";
+import type { AgentDef, JobAction, JobRequest, JobStatus, JobSummary, Project } from "../../../shared/types.ts";
+import { getAgents, getModels } from "../api.ts";
 import { duration } from "../format.ts";
 import { Card, cx, Empty } from "./ui.tsx";
 
 const ACTIONS: { key: JobAction; label: string; icon: ReactNode; help: string }[] = [
   { key: "plan", label: "Plan", icon: <Brain className="size-4" />, help: "Opus analiza el proyecto (solo lectura) y escribe un plan." },
+  { key: "agent", label: "Agente", icon: <Bot className="size-4" />, help: "Lanza uno de tus agentes (pestaña Agentes) con una tarea." },
   { key: "exec", label: "Ejecutar", icon: <Hammer className="size-4" />, help: "El modelo local implementa un plan paso a paso en una rama ai/…" },
   { key: "review", label: "Revisar", icon: <ScanSearch className="size-4" />, help: "Opus revisa el diff de la rama del agente." },
   { key: "chat", label: "Chat", icon: <MessagesSquare className="size-4" />, help: "Chat libre con el modelo local (Aider). Escribe /exit para salir." },
@@ -36,11 +37,16 @@ const label = (text: string, child: ReactNode, hint?: string) => (
 );
 
 // --- Formulario ----------------------------------------------------------------
-export function LaunchForm({ projects, project, run, onLaunch }: {
+/** Preselección desde otra vista (p. ej. "Usar" en Agentes). nonce cambia en cada clic. */
+export interface LaunchPreset { action: JobAction; agent?: string; nonce: number }
+
+export function LaunchForm({ projects, project, run, onLaunch, preset }: {
   projects: Project[]; project: string; run: string;
-  onLaunch: (req: JobRequest) => Promise<void>;
+  onLaunch: (req: JobRequest) => Promise<void>; preset?: LaunchPreset | null;
 }) {
   const [action, setAction] = useState<JobAction>("plan");
+  const [agents, setAgents] = useState<AgentDef[] | null>(null);
+  const [agent, setAgent] = useState("");
   const [proj, setProj] = useState(project);
   const [custom, setCustom] = useState("");
   const [task, setTask] = useState("");
@@ -53,6 +59,14 @@ export function LaunchForm({ projects, project, run, onLaunch }: {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { if (project) setProj(project); }, [project]);
+  useEffect(() => {
+    if (!preset) return;
+    setAction(preset.action);
+    if (preset.agent) setAgent(preset.agent);
+  }, [preset?.nonce]);
+  useEffect(() => {
+    if (action === "agent") getAgents().then((list) => { setAgents(list); setAgent((cur) => cur || list[0]?.id || ""); }).catch((e) => setError(String(e.message)));
+  }, [action]);
   useEffect(() => { setPlan(run); }, [run]);
   useEffect(() => {
     if (action === "use" && !models) getModels().then((m) => { setModels(m); setModel(m.executor); }).catch((e) => setError(String(e.message)));
@@ -67,7 +81,8 @@ export function LaunchForm({ projects, project, run, onLaunch }: {
     setError(null);
     const req: JobRequest = { action };
     if (needsProject) req.project = target;
-    if (action === "plan") req.task = task;
+    if (action === "plan" || action === "agent") req.task = task;
+    if (action === "agent") req.agent = agent;
     if (action === "exec") {
       if (plan && proj !== "__custom") req.plan = plan;
       if (interactive) req.interactive = true;
@@ -77,7 +92,7 @@ export function LaunchForm({ projects, project, run, onLaunch }: {
     setBusy(true);
     try {
       await onLaunch(req);
-      if (action === "plan") setTask("");
+      if (action === "plan" || action === "agent") setTask("");
       setFrom("");
     } catch (err) {
       setError((err as Error).message);
@@ -89,7 +104,7 @@ export function LaunchForm({ projects, project, run, onLaunch }: {
   return (
     <Card title="Lanzar" icon={<Play className="size-4 text-muted" />}>
       <form onSubmit={submit} className="flex flex-col gap-3">
-        <div className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-panel-2 p-1" role="radiogroup" aria-label="Acción">
+        <div className="grid grid-cols-4 gap-1 rounded-lg border border-line bg-panel-2 p-1" role="radiogroup" aria-label="Acción">
           {ACTIONS.map((a) => (
             <button key={a.key} type="button" role="radio" aria-checked={action === a.key} onClick={() => setAction(a.key)}
               className={cx("flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs",
@@ -112,10 +127,16 @@ export function LaunchForm({ projects, project, run, onLaunch }: {
           </>
         ), proj === "__custom" ? "Ruta dentro de PROJECTS_ROOT (config.env), p. ej. personal/mi-app." : undefined)}
 
-        {action === "plan" && label("Tarea", (
+        {action === "agent" && label("Agente", (
+          <select className={inputCls} value={agent} onChange={(e) => setAgent(e.target.value)} disabled={!agents}>
+            {agents?.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.engine === "claude" ? "Opus, solo lectura" : a.access === "read" ? "local, solo lectura" : "local, escribe"}</option>)}
+          </select>
+        ), agents?.find((a) => a.id === agent)?.description)}
+
+        {(action === "plan" || action === "agent") && label("Tarea", (
           <textarea className={cx(inputCls, "min-h-28 resize-y")} value={task} onChange={(e) => setTask(e.target.value)}
             placeholder='p. ej. "añadir endpoint GET /tasks con paginación"' maxLength={4000} required />
-        ), "Cuanto más concreta, mejor plan.")}
+        ), action === "agent" ? "Qué quieres que haga este agente." : "Cuanto más concreta, mejor plan.")}
 
         {action === "exec" && (
           <>
@@ -206,6 +227,7 @@ export function JobTerminal({ ref, job, onInput, onResize }: {
   const fit = useRef<FitAddon | null>(null);
   const inputRef = useRef(onInput);
   const resizeRef = useRef(onResize);
+  const queue = useRef<{ reset: boolean; bytes: Uint8Array }[]>([]);   // salida antes de crear xterm
   inputRef.current = onInput;
   resizeRef.current = onResize;
 
@@ -226,7 +248,9 @@ export function JobTerminal({ ref, job, onInput, onResize }: {
     ro.observe(box.current!);
     term.current = t;
     fit.current = f;
-    return () => { ro.disconnect(); t.dispose(); };
+    for (const q of queue.current) { if (q.reset) t.reset(); t.write(q.bytes); }
+    queue.current = [];
+    return () => { ro.disconnect(); t.dispose(); term.current = null; };
   }, []);
 
   // Al cambiar de trabajo: limpia y avisa del tamaño (la repetición llega por job_output).
@@ -240,8 +264,13 @@ export function JobTerminal({ ref, job, onInput, onResize }: {
 
   useImperativeHandle(ref, () => ({
     write(reset, bytes) {
-      if (reset) term.current?.reset();
-      if (bytes.length) term.current?.write(bytes);
+      if (!term.current) {
+        if (reset) queue.current = [];
+        queue.current.push({ reset, bytes });
+        return;
+      }
+      if (reset) term.current.reset();
+      if (bytes.length) term.current.write(bytes);
     },
   }), []);
 

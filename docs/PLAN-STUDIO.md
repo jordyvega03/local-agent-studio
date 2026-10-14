@@ -1,6 +1,6 @@
 # Plan: AI Studio (interfaz web para los agentes)
 
-Estado: **Fases 0 a 3 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
+Estado: **Fases 0 a 4 hechas** (2026-10-14). Seguimiento en `ROADMAP.md`.
 
 Objetivo: una interfaz web más completa que `ai dashboard` para ver sesiones y tokens del
 ejecutor, mandar comandos desde el navegador, ver CPU/RAM/GPU en tiempo real y crear
@@ -79,7 +79,7 @@ Decidido (2026-10-14): backend Node/TS. Componentes propios con Tailwind en esti
   Monaco: ~10 veces más ligero, sin workers ni CDN (encaja con la CSP).
 - Lo lanzado desde la web también queda en `.ai/logs/`.
 
-### Fase 4 — Agentes con roles (4–5 días)
+### Fase 4 — Agentes con roles (4–5 días) ✅ 2026-10-14
 Un archivo por agente, estilo `config.env` (compatible con bash 3.2):
 
 ```bash
@@ -101,8 +101,9 @@ AGENT_VERIFY="npm test"         # comando que debe pasar
 | Docs | local | Actualiza README y documentación |
 
 - `ai agent <nombre> <proyecto> "tarea"`; crear/editar agentes desde la web.
-- El Tester necesita la **imagen propia del executor** con las toolchains (ROADMAP),
-  con el mismo endurecimiento. Pendiente: qué stacks (Node, Python, Java…).
+- Hecho: imagen propia del ejecutor con Node 22 + pytest (calorie-tracker es Next.js;
+  otras toolchains se añaden en `docker/executor/Dockerfile`). Los agentes claude solo leen.
+  La verificación usa los `node_modules` del proyecto (volumen Linux propio: ROADMAP).
 
 ### Fase 5 — Flujos multiagente (3–4 días)
 ```bash
