@@ -12,4 +12,4 @@ Repo del agente local de desarrollo de Jordy. Lee `README.md` y `docs/ARCHITECTU
 - Nunca pongas secretos en archivos del repo. `ANTHROPIC_API_KEY` solo llega por el entorno.
 - `ai exec` depende del formato `### Paso N` y `**Archivo(s):**` de `prompts/planner.md`. Si cambias uno, cambia el otro.
 - Cada mejora: actualiza la doc correspondiente y mueve el ítem en `docs/ROADMAP.md` a "Hecho" con la fecha.
-- Valida con `bash -n bin/ai`, `docker compose -f docker/compose.yml config` (con las variables de `bin/ai`) y `cd studio && npm run typecheck && npm test`.
+- Valida con `bash -n bin/ai`, `docker compose -f docker/compose.yml config` (con las variables de `bin/ai`) y `cd studio && npm run typecheck && npm test`. El CI (`.github/workflows/ci.yml`) repite todo eso más shellcheck (`-S warning`) en cada push a `main` y en cada PR: no lo dejes en rojo.

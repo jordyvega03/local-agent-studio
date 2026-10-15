@@ -42,6 +42,9 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-15 — **CI en GitHub Actions**: tests, typecheck, build, shellcheck (sin avisos
+      tras limpiar `bin/ai`), compose, Python e imagen del ejecutor en cada push y PR.
+
 - [x] 2026-10-15 — **URLs cortas** en el Studio (`/calorie-tracker/20261014-1225`,
       `/calorie-tracker/sistema`…), con atrás/adelante del navegador y enlaces antiguos
       compatibles; `bin/ai` acepta el nombre corto del proyecto (`ai studio calorie-tracker`).

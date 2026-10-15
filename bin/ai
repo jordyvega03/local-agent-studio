@@ -331,7 +331,8 @@ cmd_plan() {
   command -v claude >/dev/null || die "Claude Code no está instalado."
   mkdir -p "$dir/.ai/plans"
   local slug; slug="$(echo "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-40 | sed 's/-$//')"
-  local file="$dir/.ai/plans/$(date +%Y%m%d-%H%M)-$slug.md"
+  local file
+  file="$dir/.ai/plans/$(date +%Y%m%d-%H%M)-$slug.md"
   info "Opus ($PLANNER_MODEL) analizando $(basename "$dir") en modo solo lectura…"
   if ! command -v python3 >/dev/null; then   # sin python3: sin vista en vivo ni panel
     (cd "$dir" && claude -p "$(cat "$AI_HOME/prompts/planner.md") $task" \
@@ -353,7 +354,7 @@ cmd_plan() {
       PLAN_STATE=failed; rm -f "$file"; notify "ai · plan falló" "$(basename "$dir"): el planificador no devolvió nada"
       die "El planificador no devolvió nada."
     fi
-    PLAN_STATE=done
+    PLAN_STATE="done"
   fi
   ok "Plan guardado: ${file#$dir/}"
   notify "ai · plan listo" "$(basename "$dir"): revísalo y lanza ai exec"
@@ -482,7 +483,7 @@ $(cat "$step")"; then
       warn "Falló el paso $n. Reanuda con: ai exec $(basename "$dir") $rel --from $n"; exit 1
     fi
   done
-  EXEC_STATE=done
+  EXEC_STATE="done"
   ai_event exec_done
   notify "ai · ejecución terminada" "$(basename "$dir"): $total pasos de $name"
   echo; ok "Plan completado. Revisa los cambios:"
@@ -587,7 +588,8 @@ cmd_agent() {
   fi
 
   local slug; slug="$(echo "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-30 | sed 's/-$//')"
-  local run="$(date +%Y%m%d-%H%M%S)-$name-$slug"
+  local run
+  run="$(date +%Y%m%d-%H%M%S)-$name-$slug"
   mkdir -p "$dir/.ai"
   init_run_log "$dir" "$run"
   AGENT_STATE=running
@@ -605,7 +607,7 @@ TAREA: $task" --model "$model" --output-format stream-json --verbose \
         --allowedTools "Read" "Glob" "Grep" \
         --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
         | python3 "$AIWATCH" plan-stream "$EVENT_LOG" "$dir/.ai/logs/$run.result.md" agent); then
-      AGENT_STATE=done; ok "Resultado: .ai/logs/$run.result.md"
+      AGENT_STATE="done"; ok "Resultado: .ai/logs/$run.result.md"
       notify "ai · agente $label terminado" "$(basename "$dir"): $task"; return 0
     fi
     AGENT_STATE=failed; notify "ai · agente $label falló" "$(basename "$dir")"; die "El agente no devolvió nada."
@@ -658,7 +660,7 @@ $task"; then
   fi
   ai_event exec_done
   ai_event agent_done secs="$(( $(date +%s) - t0 ))"
-  AGENT_STATE=done
+  AGENT_STATE="done"
   ok "Agente $label terminado."
   notify "ai · agente $label terminado" "$(basename "$dir"): $task"
 }
@@ -741,7 +743,8 @@ cmd_flow() {
   [ "$retries" -eq 0 ] || [ -f "$AI_HOME/agents/$fix.env" ] || die "FLOW_FIX_AGENT '$fix' no existe en agents/."
 
   local slug; slug="$(echo "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-30 | sed 's/-$//')"
-  local run="$(date +%Y%m%d-%H%M%S)-flow-$name-$slug"
+  local run
+  run="$(date +%Y%m%d-%H%M%S)-flow-$name-$slug"
   mkdir -p "$dir/.ai"
   init_run_log "$dir" "$run"
   local flow_log="$EVENT_LOG" decision="$dir/.ai/logs/$run.decision"
@@ -808,7 +811,7 @@ $(tail -n 60 "$vlog" | sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" | tr -d 
     esac
   done
   ai_event flow_done
-  FLOW_STATE=done
+  FLOW_STATE="done"
   notify "ai · flujo $label completado" "$(basename "$dir"): $total etapas"
   echo; ok "Flujo $label completado ($total etapas)."
 }

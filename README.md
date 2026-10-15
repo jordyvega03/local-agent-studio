@@ -1,5 +1,7 @@
 # Agente local de desarrollo
 
+[![CI](https://github.com/jordyvega03/local-agent-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/jordyvega03/local-agent-studio/actions/workflows/ci.yml)
+
 Sistema de dos agentes para desarrollar aplicaciones personales en un MacBook M4 / 24 GB:
 
 - **Opus (Claude Code)** analiza el proyecto y escribe un plan detallado. Solo puede leer.
@@ -298,6 +300,7 @@ agents/
 ├── prompts/agents/*.md          # instrucciones de cada agente
 ├── docker/executor/Dockerfile   # imagen del ejecutor: Aider + Node + pytest
 ├── lib/aiwatch.py               # eventos, análisis en vivo y servidor del panel
+├── .github/workflows/ci.yml     # CI: tests, typecheck, shellcheck, compose, imagen
 ├── dashboard/index.html         # panel web (sin dependencias externas)
 ├── studio/                      # AI Studio: server/ (Fastify), ui/ (React), shared/ (tipos)
 ├── docs/

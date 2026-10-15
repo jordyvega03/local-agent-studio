@@ -276,6 +276,18 @@ ai flow feature mi-app "tarea"
 - Mermaid queda pendiente: la versión sin avisos de seguridad (12.2.0) es demasiado reciente
   (ver ROADMAP); los bloques `mermaid` se muestran como código.
 
+## CI (GitHub Actions)
+
+`.github/workflows/ci.yml`, en cada push a `main` y en cada PR:
+
+| Job | Runner | Qué comprueba |
+|---|---|---|
+| `studio` | macOS (bash 3.2 del sistema, node-pty con binarios de macOS) | `npm ci`, typecheck, los tests de `studio/` (incluyen `bash -n` de `bin/ai` con `/bin/bash` 3.2, la guarda de `$var…` y la paridad Python/TS), build de la UI, `zsh -n completions/_ai`, `npm audit --audit-level=high` |
+| `shell` | Ubuntu (Docker) | shellcheck 0.10.0 (`-S warning`) de `bin/ai`, `docker compose config`, `py_compile` de `lib/aiwatch.py` y que la imagen del ejecutor se construya |
+
+Acciones fijadas por hash de commit (no por etiqueta), permisos de solo lectura y
+`concurrency` para cancelar ejecuciones viejas de la misma rama.
+
 ## Archivos que se generan en cada proyecto
 
 | Ruta | Qué es | ¿Commitear? |

@@ -1,0 +1,71 @@
+# CI: las mismas validaciones que pide CLAUDE.md, en cada push a main y en cada PR.
+# Acciones fijadas por hash de commit (una etiqueta se puede mover); comentario = versión.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read            # solo lectura: el CI no escribe en el repo
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true  # un push nuevo cancela la ejecución anterior de la misma rama
+
+jobs:
+  # macOS: el entorno real (bash 3.2 del sistema, node-pty con binarios de macOS).
+  studio:
+    name: Studio + bin/ai (macOS, bash 3.2)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+      - name: Versiones
+        run: /bin/bash --version | head -1 && node --version && npm --version && python3 --version && git --version
+      - name: Dependencias (versiones fijadas del lockfile)
+        run: npm ci --no-audit --no-fund
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Tests (incluye bash -n con /bin/bash 3.2 y paridad Python/TS)
+        run: npm test
+      - name: Compilar la interfaz
+        run: npm run build
+      - name: Autocompletado de zsh
+        working-directory: .
+        run: zsh -n completions/_ai
+      - name: Auditoría de dependencias
+        run: npm audit --audit-level=high
+
+  # Linux: lo que necesita Docker y el análisis estático del shell.
+  shell:
+    name: shellcheck, compose y Python (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: shellcheck de bin/ai (versión fijada, avisos y errores)
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 --shell=bash -S warning bin/ai
+      - name: docker compose config (con las variables que pasa bin/ai)
+        run: |
+          set -a; . ./config.env; set +a
+          PROJECT_DIR="$PWD/run" OLLAMA_PORT="${TOKEN_METER_PORT}" GIT_NAME=ci GIT_EMAIL=ci@localhost \
+            docker compose -f docker/compose.yml config >/dev/null
+      - name: lib/aiwatch.py compila
+        run: python3 -m py_compile lib/aiwatch.py
+      - name: Imagen del ejecutor se construye
+        run: |
+          set -a; . ./config.env; set +a
+          docker build -q -t ci-executor \
+            --build-arg AIDER_IMAGE="$AIDER_IMAGE" --build-arg NODE_IMAGE="$EXECUTOR_NODE_IMAGE" \
+            --build-arg PYTEST_VERSION="$EXECUTOR_PYTEST_VERSION" docker/executor
+          docker run --rm --entrypoint sh ci-executor -c 'node --version && /venv/bin/python -m pytest --version'
