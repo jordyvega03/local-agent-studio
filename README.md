@@ -241,6 +241,14 @@ salida, tiempos, tokens/s y tiempo hasta el primer token en `logs/tokens.jsonl` 
 - Cada arranque genera un **token nuevo**; `ai studio` abre el navegador ya autenticado.
   Si abres `http://127.0.0.1:8766` a mano verás "Sesión no válida": usa `ai studio`.
 - Desarrollo de la UI con recarga en caliente: ver `studio/README.md`.
+- **URLs cortas**: `/calorie-tracker` (su sesión más reciente), `/calorie-tracker/20261014-1225`
+  (una sesión, por su fecha-hora), `/calorie-tracker/proyecto` (y `acciones`, `agentes`,
+  `tokens`, `sistema`). Los botones atrás/adelante del navegador funcionan. Los enlaces
+  antiguos (`?project=…&run=…`) se convierten solos.
+
+En todos los comandos, el proyecto puede ser la ruta, la carpeta dentro de `PROJECTS_ROOT`
+(`personal/calorie-tracker`) o **el nombre de un proyecto que ai ya conoce**
+(`ai studio calorie-tracker`, `ai exec calorie-tracker`).
 
 ### 5. Apagar y liberar memoria
 

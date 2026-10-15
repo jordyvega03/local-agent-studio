@@ -151,6 +151,15 @@ app.get("/ws", { websocket: true }, (socket) => handleSocket(socket, cfg, metric
 
 if (existsSync(cfg.uiDist)) {
   await app.register(fastifyStatic, { root: cfg.uiDist, wildcard: false });
+  // URLs de la UI (/calorie-tracker/20261014-1225, /calorie-tracker/sistema…): todas sirven la
+  // misma página y la UI decide qué mostrar. Lo que empieza por /api o /assets sigue dando 404.
+  app.setNotFoundHandler((req, reply) => {
+    const path = req.url.split("?")[0];
+    if (req.method === "GET" && !/^\/(api|assets|ws|auth)(\/|$)/.test(path) && !/\.[a-z0-9]+$/i.test(path)) {
+      return reply.type("text/html; charset=utf-8").sendFile("index.html");
+    }
+    return reply.code(404).type("text/plain; charset=utf-8").send("No encontrado");
+  });
 } else {
   app.get("/", async (_req, reply) =>
     reply.type("text/plain; charset=utf-8").send("Falta compilar la UI: cd studio && npm run build (ai studio lo hace solo)"));

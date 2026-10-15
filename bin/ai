@@ -67,14 +67,20 @@ model_installed() {
   ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1:latest"
 }
 
-# Resuelve "mi-app" -> $PROJECTS_ROOT/mi-app, o acepta ruta absoluta/relativa.
+# Resuelve el proyecto: ruta absoluta/relativa, carpeta dentro de $PROJECTS_ROOT
+# (p. ej. personal/mi-app) o el nombre de un proyecto que ai ya conoce (run/projects), igual
+# que en las URLs del Studio: "calorie-tracker" -> ~/Documents/personal/calorie-tracker.
 resolve_project() {
-  local p="${1:-}"
+  local p="${1:-}" known
   [ -n "$p" ] || die "Falta el proyecto. Ej: ai exec ~/Documents/mi-app"
-  if [ -d "$p" ]; then (cd "$p" && pwd)
-  elif [ -d "$PROJECTS_ROOT/$p" ]; then (cd "$PROJECTS_ROOT/$p" && pwd)
-  else die "No existe el proyecto: $p (ni en $PROJECTS_ROOT/$p)"
-  fi
+  if [ -d "$p" ]; then (cd "$p" && pwd); return; fi
+  if [ -d "$PROJECTS_ROOT/$p" ]; then (cd "$PROJECTS_ROOT/$p" && pwd); return; fi
+  case "$p" in */*) ;; *)
+    known="$(grep -E "/${p//./\\.}\$" "$PROJECTS_FILE" 2>/dev/null | while read -r d; do [ -d "$d" ] && echo "$d"; done || true)"
+    if [ -n "$known" ] && [ "$(echo "$known" | wc -l | tr -d ' ')" = 1 ]; then echo "$known"; return; fi
+    [ -n "$known" ] && die "Hay varios proyectos llamados '$p': usa la ruta (p. ej. $(echo "$known" | head -1 | sed "s|^$PROJECTS_ROOT/||"))" ;;
+  esac
+  die "No existe el proyecto: $p (ni en $PROJECTS_ROOT/$p, ni entre los que ai conoce: ai studio los lista)"
 }
 
 # Comprobación de seguridad: nunca montar el HOME completo ni carpetas sensibles.

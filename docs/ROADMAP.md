@@ -42,6 +42,10 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-15 — **URLs cortas** en el Studio (`/calorie-tracker/20261014-1225`,
+      `/calorie-tracker/sistema`…), con atrás/adelante del navegador y enlaces antiguos
+      compatibles; `bin/ai` acepta el nombre corto del proyecto (`ai studio calorie-tracker`).
+
 - [x] 2026-10-14 — **Pestaña Proyecto** en el Studio: ramas `ai/*` con diff visual
       (unificado o lado a lado, por rama o por commit), commits, enlace a su sesión,
       comandos para fusionar/descartar, y documentación Markdown del proyecto renderizada

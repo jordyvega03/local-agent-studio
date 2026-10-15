@@ -157,7 +157,8 @@ export interface RunSummary {
   updated: number;
 }
 
-export interface Project { dir: string; name: string; runs: RunSummary[] }
+/** slug: nombre corto y único para la URL (/calorie-tracker/…). */
+export interface Project { dir: string; name: string; slug: string; runs: RunSummary[] }
 
 export interface LoadedModel { name: string; size: number; gpu: number; context?: number; until?: string }
 

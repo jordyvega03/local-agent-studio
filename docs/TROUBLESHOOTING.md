@@ -134,6 +134,11 @@ Ejecuta `ai completion` y sigue sus instrucciones; con oh-my-zsh la línea `fpat
 **antes** de `source $ZSH/oh-my-zsh.sh`. Abre una terminal nueva. Si sigue sin ir:
 `rm -f ~/.zcompdump*; exec zsh`.
 
+### "No existe el proyecto: mi-app"
+`bin/ai` busca la ruta, `PROJECTS_ROOT/mi-app` o un proyecto que ya conoce con ese nombre.
+La primera vez usa la ruta (`ai studio ~/Documents/personal/mi-app` o `personal/mi-app`);
+después basta con `mi-app`. Si dos proyectos se llaman igual, usa la ruta.
+
 ### Ver logs
 ```bash
 ai logs            # Ollama

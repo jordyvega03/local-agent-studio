@@ -14,23 +14,19 @@ import { ThemeToggle } from "./components/ThemeToggle.tsx";
 import { SystemView } from "./components/System.tsx";
 import { TerminalCard, type TerminalHandle } from "./components/Terminal.tsx";
 import { Code, cx } from "./components/ui.tsx";
-
-type View = "session" | "project" | "actions" | "agents" | "system" | "tokens";
+import { buildPath, parseLocation, resolveRoute, type View, type WantedRoute } from "./route.ts";
 
 /** Mismo criterio que defaultStep() del servidor: el paso actual o el último con salida. */
 const followStep = (r: RunState | null) => r ? r.exec.current ?? r.exec.logs.at(-1) ?? r.exec.steps[0]?.n ?? null : null;
 
-function readUrl() {
-  const p = new URLSearchParams(location.search);
-  return { project: p.get("project") ?? "", run: p.get("run") ?? "", view: (["system", "tokens", "actions", "agents", "project"].includes(p.get("view") ?? "") ? p.get("view") : "session") as View };
-}
-
 export function App() {
-  const [sel, setSel] = useState(() => {
-    const { view: _v, ...rest } = readUrl();
-    return { ...rest, step: null as number | null };
-  });
-  const [view, setView] = useState<View>(() => readUrl().view);
+  // Lo que pide la URL se resuelve cuando llegan los proyectos (route.ts).
+  const wanted = useRef<WantedRoute | null>(parseLocation());
+  const [sel, setSel] = useState({ project: "", run: "", step: null as number | null });
+  const [view, setViewState] = useState<View>(() => wanted.current!.view);
+  // Navegar = nueva entrada en el historial (atrás/adelante); correcciones automáticas = reemplazar.
+  const navMode = useRef<"push" | "replace">("replace");
+  const setView = (v: View) => { navMode.current = "push"; setViewState(v); };
   const [logStep, setLogStep] = useState<number | null>(null);
   const term = useRef<TerminalHandle>(null);
   // La salida puede llegar antes de que exista la terminal (se monta al llegar el estado del
@@ -77,21 +73,41 @@ export function App() {
   };
   const job = live.jobs.find((j) => j.id === jobId) ?? null;
 
-  // Si el proyecto o el plan de la URL no existen, elige el más reciente.
+  // Al llegar los proyectos: resolver la URL pedida (o la del botón atrás/adelante). Si el
+  // proyecto o la sesión ya no existen, se eligen los más recientes.
   useEffect(() => {
     if (!projects?.length) return;
+    if (wanted.current) {
+      const r = resolveRoute(wanted.current, projects);
+      wanted.current = null;
+      if (r) { setSel({ project: r.project, run: r.run, step: null }); setViewState(r.view); }
+      return;
+    }
     const proj = projects.find((p) => p.dir === sel.project) ?? projects[0];
     const runName = proj.runs.some((r) => r.name === sel.run) ? sel.run : proj.runs[0]?.name ?? "";
     if (proj.dir !== sel.project || runName !== sel.run) setSel({ project: proj.dir, run: runName, step: null });
   }, [projects, sel.project, sel.run]);
 
   useEffect(() => {
-    const p = new URLSearchParams();
-    if (sel.project) p.set("project", sel.project);
-    if (sel.run) p.set("run", sel.run);
-    if (view !== "session") p.set("view", view);
-    history.replaceState(null, "", `?${p}`);
-  }, [sel.project, sel.run, view]);
+    const onPop = () => {
+      wanted.current = parseLocation();
+      const r = projects?.length ? resolveRoute(wanted.current, projects) : null;
+      if (r) { wanted.current = null; setSel({ project: r.project, run: r.run, step: null }); setViewState(r.view); }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [projects]);
+
+  // La URL refleja lo que se ve: /calorie-tracker/20261014-1225, /calorie-tracker/sistema…
+  useEffect(() => {
+    if (wanted.current) return;                       // aún resolviendo la URL inicial
+    const path = buildPath(projects, sel.project, sel.run, view);
+    if (path !== location.pathname || location.search) {
+      if (navMode.current === "push" && !location.search) history.pushState(null, "", path);
+      else history.replaceState(null, "", path);
+    }
+    navMode.current = "replace";
+  }, [sel.project, sel.run, view, projects]);
 
   // Refresco de 1 s para los cronómetros de lo que está en curso.
   const [, tick] = useState(0);
@@ -100,7 +116,7 @@ export function App() {
   // Fijar el paso que está en curso = volver a seguir al actual.
   const selectStep = (n: number) => setSel((s) => ({ ...s, step: n === run?.exec.current ? null : n }));
   const selected = sel.step ?? followStep(run);
-  const select = (project: string, runName: string) => { setSel({ project, run: runName, step: null }); setView("session"); };
+  const select = (project: string, runName: string) => { navMode.current = "push"; setSel({ project, run: runName, step: null }); setViewState("session"); };
   const current = projects?.find((p) => p.dir === sel.project);
 
   return (

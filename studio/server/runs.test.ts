@@ -208,3 +208,12 @@ describe("ejecuciones de flujos", () => {
     expect(st.flow!.stages[1].status).toBe("aborted");
   });
 });
+
+describe("nombres cortos de proyecto (URL)", () => {
+  it("la carpeta; con la carpeta padre si se repite; con número si aún se repite", async () => {
+    const { projectSlugs } = await import("./runs.ts");
+    const s = projectSlugs(["/u/Documents/personal/calorie-tracker", "/u/Documents/guate5/api", "/u/Documents/otro/api",
+      "/u/Documents/a/b c", "/u/x/otro/api"]);
+    expect([...s.values()]).toEqual(["calorie-tracker", "guate5-api", "otro-api", "b-c", "otro-api-2"]);
+  });
+});

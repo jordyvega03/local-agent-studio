@@ -9,6 +9,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "./config.ts";
+import { listProjects } from "./runs.ts";
 
 export const COOKIE = "studio_session";
 
@@ -66,7 +67,9 @@ export function installSecurity(app: FastifyInstance, cfg: Config, token: string
     const q = req.query as Record<string, string | undefined>;
     if (!sameToken(q.token, token)) return deny(reply, 401, "Token no válido. Abre el Studio con: ai studio");
     reply.setCookie(COOKIE, token, { httpOnly: true, sameSite: "strict", path: "/", secure: false });
-    const next = q.project ? `/?project=${encodeURIComponent(q.project)}` : "/";
+    // URL corta: /<proyecto> (ver ui/src/route.ts). Un proyecto desconocido lleva al inicio.
+    const slug = q.project ? listProjects(cfg.aiHome).find((p) => p.dir === q.project)?.slug : undefined;
+    const next = slug ? `/${encodeURIComponent(slug)}` : "/";
     return reply.redirect(next);
   });
 }

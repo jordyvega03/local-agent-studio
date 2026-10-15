@@ -246,6 +246,19 @@ ai flow feature mi-app "tarea"
   (`prefers-color-scheme`). Se guarda en `localStorage` (preferencia de quien mira). Las
   terminales xterm cambian de fondo con el evento `studio-theme-change`.
 
+## URLs del Studio
+
+- `ui/src/route.ts`: `/<proyecto>[/<sesión>|/proyecto|/acciones|/agentes|/tokens|/sistema]`.
+  El proyecto es su `slug` (carpeta; con la carpeta padre si se repite: `projectSlugs` en
+  `server/runs.ts`) y la sesión su fecha-hora (`20261014-1225`) o el nombre completo si dos
+  coinciden. La sesión más reciente no lleva id. Navegar usa `pushState` (atrás/adelante);
+  las correcciones automáticas, `replaceState`. `?project=&run=&view=` se sigue aceptando.
+- El servidor sirve `index.html` para cualquier GET que no sea `/api`, `/assets`, `/ws`,
+  `/auth` ni un archivo (con sesión: el control de cookie de `security.ts` se aplica igual).
+  `/auth` redirige a `/<slug>`.
+- `bin/ai` (`resolve_project`) acepta también el nombre corto de un proyecto registrado en
+  `run/projects` (solo si es único).
+
 ## Pestaña Proyecto (diff visual y documentos)
 
 - **`server/git.ts`** (solo lectura): `git` con `execFile` (sin shell). Ramas `ai/*` con

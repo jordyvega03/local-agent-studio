@@ -2,7 +2,7 @@
 // lib/aiwatch.py (el panel ligero): si cambias una, cambia la otra. Los tests de
 // runs.test.ts fijan el comportamiento.
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { AgentRun, FlowRun, OpusUsage, PlanStep, Project, RunState, RunSummary, Status, TokenStats } from "../shared/types.ts";
 
 export const RUN_NAME = /^[A-Za-z0-9._-]+$/;
@@ -282,8 +282,29 @@ export function registeredProjects(aiHome: string): string[] {
   return [...seen];
 }
 
+/** Nombre corto para la URL: la carpeta; si se repite, carpeta-padre + carpeta; si aún se
+ *  repite, con un número. Solo letras, números, ".", "_" y "-". */
+export function projectSlugs(dirs: string[]): Map<string, string> {
+  const clean = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "proyecto";
+  const count = new Map<string, number>();
+  for (const d of dirs) count.set(clean(basename(d)), (count.get(clean(basename(d))) ?? 0) + 1);
+  const out = new Map<string, string>();
+  const used = new Set<string>();
+  for (const d of dirs) {
+    let slug = clean(basename(d));
+    if ((count.get(slug) ?? 0) > 1) slug = clean(`${basename(dirname(d))}-${basename(d)}`);
+    let n = 2, s = slug;
+    while (used.has(s)) s = `${slug}-${n++}`;
+    used.add(s);
+    out.set(d, s);
+  }
+  return out;
+}
+
 export function listProjects(aiHome: string): Project[] {
-  return registeredProjects(aiHome).map((dir) => ({ dir, name: basename(dir), runs: listRuns(dir).slice(0, 40) }));
+  const dirs = registeredProjects(aiHome);
+  const slugs = projectSlugs(dirs);
+  return dirs.map((dir) => ({ dir, name: basename(dir), slug: slugs.get(dir)!, runs: listRuns(dir).slice(0, 40) }));
 }
 
 export function stepLogPath(pdir: string, name: string, step: number): string {
