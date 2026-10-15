@@ -98,6 +98,22 @@ git switch main && git merge ai/<plan>   # si te gusta
 git branch -D ai/<plan>                  # si no
 ```
 
+### Contexto del proyecto
+
+```bash
+ai context calorie-tracker --init       # Opus lee el proyecto y escribe .ai/context.md (1 llamada)
+ai context calorie-tracker --template   # o una plantilla para rellenar a mano
+ai context calorie-tracker              # verlo
+```
+
+Un archivo por proyecto con lo que un agente necesita para no equivocarse: qué es, stack y
+carpetas, cómo se ejecuta y se comprueba, convenciones (con archivos de ejemplo), qué no
+tocar y reglas para el agente. **Lo leen todos**: Opus lo recibe al principio del prompt
+(`plan`, `review`, agentes claude; hasta `CONTEXT_MAX_BYTES`) y el modelo local como archivo
+de solo lectura (`exec`, agentes, `chat`, flujos). Revísalo tras generarlo y **commitéalo**
+en el proyecto. En el Studio: tarjeta "Contexto del proyecto" en la pestaña Proyecto (ver,
+editar, generar o regenerar con Opus, plantilla).
+
 ### Agentes con roles
 
 ```bash
@@ -274,6 +290,7 @@ ai down --all    # además cierra Docker Desktop (libera también su VM)
 | `ai studio [proy]` / `ai studio stop` / `--rebuild` | AI Studio (React, con token) / detener / recompilar |
 | `ai architect <proy>` | Aider architect: Opus + local en un solo chat (requiere `ANTHROPIC_API_KEY`) |
 | `ai agent list` / `ai agent <id> <proy> "tarea"` | Agentes con roles (`agents/*.env`) |
+| `ai context <proy> [--init\|--force\|--template]` | Contexto del proyecto (`.ai/context.md`) que leen todos los agentes |
 | `ai flow list` / `ai flow <id> <proy> "tarea" [--yes]` | Flujos multiagente (`flows/*.env`) |
 | `ai completion` | Cómo activar el autocompletado de zsh (`completions/_ai`) |
 | `ai build` | (Re)construye la imagen del ejecutor (Aider + Node + pytest) |

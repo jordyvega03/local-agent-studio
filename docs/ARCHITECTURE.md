@@ -246,6 +246,20 @@ ai flow feature mi-app "tarea"
   (`prefers-color-scheme`). Se guarda en `localStorage` (preferencia de quien mira). Las
   terminales xterm cambian de fondo con el evento `studio-theme-change`.
 
+## Contexto del proyecto (`.ai/context.md`)
+
+- `bin/ai`: `context_prompt` lo antepone (hasta `CONTEXT_MAX_BYTES`) al prompt de Opus en
+  `ai plan`, `ai review` y los agentes claude; `context_read_args` añade
+  `--read .ai/context.md` a Aider en `ai exec` (pasos y `-i`), `ai chat` y los agentes aider
+  (y por tanto en los flujos).
+- `ai context --init/--force`: Opus en solo lectura con `prompts/context.md`, mismo filtro en
+  vivo que `ai plan` (`plan-stream` a `/dev/null`), escribe a un temporal y lo mueve al
+  final (un fallo no deja un contexto a medias). `--template` copia
+  `prompts/context-template.md`.
+- Studio (`server/context.ts`): leer (proyectos registrados), guardar con control de
+  conflictos por `mtime` y crear la plantilla (solo dentro de `PROJECTS_ROOT`); la acción
+  `context` de la cola lanza `ai context --init|--force`. Aparece el primero en Documentos.
+
 ## URLs del Studio
 
 - `ui/src/route.ts`: `/<proyecto>[/<sesión>|/proyecto|/acciones|/agentes|/tokens|/sistema]`.
@@ -299,6 +313,7 @@ Acciones fijadas por hash de commit (no por etiqueta), permisos de solo lectura 
 | `.ai/logs/<plan>.tokens.jsonl` | Peticiones del medidor de ese plan | No |
 | `.ai/logs/<run>.result.md` | Respuesta de un agente con motor claude | No |
 | `.ai/logs/<flujo>.decision` | Decisión del Studio en una pausa (se borra al leerla) | No |
+| `.ai/context.md` | Contexto del proyecto (lo escribes tú o `ai context --init`) | **Sí**: viaja con el código |
 | `.ai/project.env` | `VERIFY_CMD` del proyecto (opcional, lo escribes tú) | Sí, si quieres compartirlo |
 | `.aider.chat.history.md`, `.aider.input.history`, `.aider.tags.cache.*` | Estado de Aider | No (Aider los añade a `.gitignore`) |
 

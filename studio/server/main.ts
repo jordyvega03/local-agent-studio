@@ -9,6 +9,7 @@ import Fastify from "fastify";
 import { loadConfig } from "./config.ts";
 import { ActionError, buildAction, resolveProject } from "./actions.ts";
 import { AgentError, listAgents, saveAgent, validateAgent } from "./agents.ts";
+import { ContextError, createContextTemplate, readContext, saveContext } from "./context.ts";
 import { listDocs, readDoc } from "./docs.ts";
 import { listFlows } from "./flows.ts";
 import { branchCommits, branchDiff, GitError, projectGit } from "./git.ts";
@@ -146,6 +147,34 @@ app.get("/api/git/commits", gitRoute(async (q) => branchCommits(projectParam(q),
 app.get("/api/git/diff", gitRoute(async (q) => branchDiff(projectParam(q), q.branch ?? "", q.commit || undefined)));
 app.get("/api/docs", gitRoute(async (q) => listDocs(projectParam(q))));
 app.get("/api/docs/file", gitRoute(async (q) => ({ path: q.path, text: readDoc(projectParam(q), q.path ?? "") })));
+
+// Contexto del proyecto: leer (proyectos registrados), guardar y crear desde la plantilla
+// (dentro de PROJECTS_ROOT; POST/PUT exigen cookie + Origin, como el resto).
+app.get("/api/context", gitRoute(async (q) => {
+  const dir = projectParam(q);
+  let writable = true;
+  try { resolveProject(dir, cfg); } catch { writable = false; }   // fuera de PROJECTS_ROOT: solo lectura
+  return { ...readContext(dir), writable };
+}));
+const contextWrite = (fn: (dir: string, body: Record<string, unknown>) => unknown) =>
+  async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const dir = resolveProject(body.project, cfg);
+      const res = fn(dir, body);
+      appendFileSync(join(cfg.aiHome, "logs", "studio-audit.jsonl"),
+        JSON.stringify({ ts: new Date().toISOString(), event: "context_saved", project: dir }) + "\n");
+      return res;
+    } catch (err) {
+      if (err instanceof ActionError || err instanceof ContextError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  };
+app.put("/api/context", contextWrite((dir, b) => {
+  if (typeof b.text !== "string" || !(b.mtime === null || typeof b.mtime === "number")) throw new ContextError("Petición incompleta.");
+  return saveContext(dir, b.text, b.mtime as number | null);
+}));
+app.post("/api/context/template", contextWrite((dir) => createContextTemplate(cfg.aiHome, dir)));
 
 app.get("/ws", { websocket: true }, (socket) => handleSocket(socket, cfg, metrics, jobs));
 

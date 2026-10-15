@@ -249,7 +249,7 @@ export interface TokensState {
 }
 
 // --- Trabajos lanzados desde la web (Fase 3) ------------------------------------
-export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up" | "agent" | "flow";
+export type JobAction = "plan" | "exec" | "review" | "chat" | "use" | "up" | "agent" | "flow" | "context";
 
 /** Lo que envía la web para lanzar una acción (lo valida server/actions.ts). */
 export interface JobRequest {
@@ -263,6 +263,15 @@ export interface JobRequest {
   agent?: string;          // agent: id del agente
   flow?: string;           // flow: id del flujo
   autoApprove?: boolean;   // flow: --yes (aprueba las pausas solo)
+  force?: boolean;         // context: regenerar aunque exista (--force)
+}
+
+/** proyecto/.ai/context.md (ai context). mtime: para editar sin pisar cambios. */
+export interface ProjectContext {
+  exists: boolean;
+  text: string;
+  mtime: number | null;
+  writable?: boolean;      // dentro de PROJECTS_ROOT: se puede editar/generar desde la web
 }
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";

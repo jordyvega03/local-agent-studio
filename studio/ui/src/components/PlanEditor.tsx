@@ -16,8 +16,11 @@ const theme = EditorView.theme({
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "color-mix(in srgb, var(--accent) 25%, transparent) !important" },
 });
 
-export function PlanEditor({ project, run, text, mtime, onClose }: {
-  project: string; run: string; text: string; mtime: number; onClose: () => void;
+export function PlanEditor({ project, run, text, mtime, onClose, save: saveFn, hint }: {
+  project: string; run: string; text: string; mtime: number | null; onClose: () => void;
+  /** Por defecto guarda el plan; el contexto del proyecto pasa su propia función. */
+  save?: (text: string, mtime: number | null) => Promise<unknown>;
+  hint?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -47,7 +50,8 @@ export function PlanEditor({ project, run, text, mtime, onClose }: {
     setSaving(true);
     setError(null);
     try {
-      await savePlan(project, run, view.current.state.doc.toString(), mtime);
+      const text = view.current.state.doc.toString();
+      await (saveFn ? saveFn(text, mtime) : savePlan(project, run, text, mtime as number));
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -62,7 +66,7 @@ export function PlanEditor({ project, run, text, mtime, onClose }: {
       <div ref={box} className="max-h-[60vh] overflow-auto" />
       {error && <p className="rounded-md border border-fail bg-fail-bg px-2.5 py-1.5 text-xs text-fail">{error} Cierra el editor y vuelve a abrirlo para ver la versión actual.</p>}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted">Mantén el formato "### Paso N" y "**Archivo(s):**": ai exec depende de él. ⌘S guarda.</span>
+        <span className="text-[11px] text-muted">{hint ?? 'Mantén el formato "### Paso N" y "**Archivo(s):**": ai exec depende de él.'} ⌘S guarda.</span>
         <div className="flex gap-2">
           <button onClick={onClose} className="flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:text-fg">
             <X className="size-3.5" />Cancelar

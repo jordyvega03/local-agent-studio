@@ -1,7 +1,7 @@
 // Pestaña Proyecto: documentos Markdown del proyecto (README, docs/, planes). Solo se sirven
 // rutas que esta lista ha encontrado (nada de rutas que lleguen de la web) y como texto: la
 // UI los convierte a HTML y los limpia (DOMPurify) antes de mostrarlos.
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { DocEntry } from "../shared/types.ts";
 
@@ -27,10 +27,11 @@ export function listDocs(dir: string): DocEntry[] {
   walk(dir, 0, found);                                       // README.md, CLAUDE.md… de la raíz
   for (const sub of ["docs", "doc", "apps", "packages"]) walk(join(dir, sub), 2, found);
   walk(join(dir, ".ai", "plans"), 0, found);
+  if (existsSync(join(dir, ".ai", "context.md"))) found.unshift(join(dir, ".ai", "context.md"));
   const seen = new Set<string>();
   return found.filter((p) => !seen.has(p) && seen.add(p)).map((p) => {
     const rel = relative(dir, p).split(sep).join("/");
-    const group: DocEntry["group"] = rel.startsWith(".ai/plans/") ? "plan" : rel.includes("/") ? "docs" : "root";
+    const group: DocEntry["group"] = rel.startsWith(".ai/plans/") ? "plan" : rel === ".ai/context.md" || !rel.includes("/") ? "root" : "docs";
     return { path: rel, group, size: statSync(p).size };
   }).sort((a, b) => (a.group === b.group ? a.path.localeCompare(b.path) : ["root", "docs", "plan"].indexOf(a.group) - ["root", "docs", "plan"].indexOf(b.group)));
 }

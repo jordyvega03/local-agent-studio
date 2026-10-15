@@ -38,3 +38,10 @@ export const getDiff = (project: string, branch: string, commit?: string) =>
   call<{ files: import("../../shared/types.ts").DiffFile[]; truncated: boolean; base: string }>("GET", `/api/git/diff?${q({ project, branch, commit })}`);
 export const getDocs = (project: string) => call<import("../../shared/types.ts").DocEntry[]>("GET", `/api/docs?${q({ project })}`);
 export const getDoc = (project: string, path: string) => call<{ path: string; text: string }>("GET", `/api/docs/file?${q({ project, path })}`);
+
+// Contexto del proyecto (.ai/context.md)
+export const getContext = (project: string) => call<import("../../shared/types.ts").ProjectContext>("GET", `/api/context?${q({ project })}`);
+export const saveContext = (project: string, text: string, mtime: number | null) =>
+  call<{ mtime: number }>("PUT", "/api/context", { project, text, mtime });
+export const createContextTemplate = (project: string) =>
+  call<import("../../shared/types.ts").ProjectContext>("POST", "/api/context/template", { project });

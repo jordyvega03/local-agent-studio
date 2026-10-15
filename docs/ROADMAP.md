@@ -42,6 +42,10 @@ Ideas ordenadas por valor y esfuerzo. Al implementar una, muévela a "Hecho" con
 
 ## Hecho
 
+- [x] 2026-10-15 — **Contexto del proyecto** (`.ai/context.md`, `ai context --init|--template`):
+      lo leen Opus (plan, review, agentes claude) y el modelo local (exec, agentes, chat,
+      flujos); tarjeta en la pestaña Proyecto para verlo, editarlo y generarlo.
+
 - [x] 2026-10-15 — **CI en GitHub Actions**: tests, typecheck, build, shellcheck (sin avisos
       tras limpiar `bin/ai`), compose, Python e imagen del ejecutor en cada push y PR.
 

@@ -139,6 +139,21 @@ run_logged_verify() {  # run_logged_verify <log> <project_dir> <comando>
   fi
 }
 
+# --- Contexto del proyecto (proyecto/.ai/context.md) ---------------------------
+# Opus lo recibe al principio del prompt; el modelo local, como archivo de solo lectura.
+CONTEXT_REL=".ai/context.md"
+
+context_prompt() {  # context_prompt <dir>  -> bloque para el prompt de Opus (nada si no hay)
+  local f="$1/$CONTEXT_REL"
+  [ -f "$f" ] || return 0
+  printf 'CONTEXTO DEL PROYECTO (%s, lo mantiene el equipo: respétalo y no lo contradigas):\n%s\n\n---\n\n' \
+    "$CONTEXT_REL" "$(head -c "$CONTEXT_MAX_BYTES" "$f")"
+}
+
+context_read_args() {  # context_read_args <dir>  -> "--read .ai/context.md" para Aider (si existe)
+  if [ -f "$1/$CONTEXT_REL" ]; then echo "--read $CONTEXT_REL"; fi
+}
+
 # --- Registro de actividad (lo lee `ai dashboard`) ---------------------------
 EVENT_LOG=""
 
@@ -335,7 +350,7 @@ cmd_plan() {
   file="$dir/.ai/plans/$(date +%Y%m%d-%H%M)-$slug.md"
   info "Opus ($PLANNER_MODEL) analizando $(basename "$dir") en modo solo lectura…"
   if ! command -v python3 >/dev/null; then   # sin python3: sin vista en vivo ni panel
-    (cd "$dir" && claude -p "$(cat "$AI_HOME/prompts/planner.md") $task" \
+    (cd "$dir" && claude -p "$(context_prompt "$dir")$(cat "$AI_HOME/prompts/planner.md") $task" \
         --model "$PLANNER_MODEL" \
         --allowedTools "Read" "Glob" "Grep" \
         --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch") >"$file"
@@ -346,7 +361,7 @@ cmd_plan() {
     ai_event plan_started task="$task" model="$PLANNER_MODEL"
     PLAN_STATE=running
     trap 'if [ "$PLAN_STATE" = running ]; then ai_event plan_aborted; fi' EXIT
-    if ! (cd "$dir" && claude -p "$(cat "$AI_HOME/prompts/planner.md") $task" \
+    if ! (cd "$dir" && claude -p "$(context_prompt "$dir")$(cat "$AI_HOME/prompts/planner.md") $task" \
         --model "$PLANNER_MODEL" --output-format stream-json --verbose \
         --allowedTools "Read" "Glob" "Grep" \
         --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
@@ -441,7 +456,8 @@ cmd_exec() {
     ai_event exec_started mode=interactive model="$EXECUTOR_MODEL" branch="$branch" from=1
     meter_context project="$dir" run="$name" agent=interactive
     trap 'meter_context' EXIT
-    run_container executor "$dir" --model "$model" --read "$rel"
+    # shellcheck disable=SC2046
+    run_container executor "$dir" --model "$model" --read "$rel" $(context_read_args "$dir")
     ai_event exec_done
     return
   fi
@@ -467,9 +483,9 @@ cmd_exec() {
     t0="$(date +%s)"
     ai_event step_started n="$n" title="$title" files="$(echo $files)"
     meter_context project="$dir" run="$name" step="$n" agent=executor
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046   # expansiones intencionadas: $files y --read del contexto
     if run_logged "$slog" executor "$dir" --model "$model" --yes-always --no-suggest-shell-commands \
-      --read "$rel" $files \
+      --read "$rel" $(context_read_args "$dir") $files \
       --message "Implementa ÚNICAMENTE este paso del plan (el plan completo está en $rel, solo como contexto). No hagas otros pasos.
 
 $(cat "$step")"; then
@@ -496,7 +512,8 @@ cmd_chat() {
   cmd_up --no-warm >/dev/null
   meter_context project="$dir" agent=chat
   trap 'meter_context' EXIT
-  run_container executor "$dir" --model "ollama_chat/$EXECUTOR_MODEL" "$@"
+  # shellcheck disable=SC2046
+  run_container executor "$dir" --model "ollama_chat/$EXECUTOR_MODEL" $(context_read_args "$dir") "$@"
 }
 
 cmd_architect() {
@@ -522,7 +539,8 @@ cmd_review() {
   fi
   info "Opus revisando el diff $base...HEAD de $(basename "$dir")…"
   ai_event review_started base="$base"
-  local prompt="Revisa este diff hecho por un modelo local siguiendo el plan $planref. Señala bugs, pasos del plan no cumplidos y problemas de seguridad. Sé concreto (archivo:línea). Responde en español."
+  local prompt
+  prompt="$(context_prompt "$dir")Revisa este diff hecho por un modelo local siguiendo el plan $planref. Señala bugs, pasos del plan no cumplidos, incumplimientos del contexto del proyecto y problemas de seguridad. Sé concreto (archivo:línea). Responde en español."
   if [ -n "$EVENT_LOG" ] && command -v python3 >/dev/null; then
     # Salida JSON: aiwatch imprime la revisión, la guarda y registra los tokens de Opus.
     (cd "$dir" && git diff "$base...HEAD" | claude -p "$prompt" --model "$PLANNER_MODEL" --output-format json \
@@ -601,7 +619,7 @@ cmd_agent() {
   if [ "$engine" = claude ]; then
     command -v claude >/dev/null || die "Claude Code no está instalado."
     local base=""; [ "$input" = diff ] && base="$(git -C "$dir" rev-parse --abbrev-ref '@{-1}' 2>/dev/null || echo main)"
-    if (cd "$dir" && { if [ -n "$base" ]; then git diff "$base...HEAD"; fi; } | claude -p "$(cat "$prompt")
+    if (cd "$dir" && { if [ -n "$base" ]; then git diff "$base...HEAD"; fi; } | claude -p "$(context_prompt "$dir")$(cat "$prompt")
 
 TAREA: $task" --model "$model" --output-format stream-json --verbose \
         --allowedTools "Read" "Glob" "Grep" \
@@ -628,9 +646,9 @@ TAREA: $task" --model "$model" --output-format stream-json --verbose \
   # contexto de solo lectura: así respeta su alcance y no rehace lo que el plan ya hizo.
   local planctx=""
   case "$branch" in ai/*) [ -f "$dir/.ai/plans/${branch#ai/}.md" ] && planctx=".ai/plans/${branch#ai/}.md" ;; esac
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086,SC2046   # expansiones intencionadas: $files y --read del contexto
   if run_logged "$slog" executor "$dir" --model "ollama_chat/$model" --yes-always --no-suggest-shell-commands $dry \
-      ${planctx:+--read "$planctx"} --message "$(cat "$prompt")
+      ${planctx:+--read "$planctx"} $(context_read_args "$dir") --message "$(cat "$prompt")
 
 TAREA:
 $task"; then
@@ -816,6 +834,50 @@ $(tail -n 60 "$vlog" | sed -e "s/$(printf '\033')\[[0-9;?]*[a-zA-Z]//g" | tr -d 
   echo; ok "Flujo $label completado ($total etapas)."
 }
 
+# --- ai context: crear o ver el contexto del proyecto ---------------------------
+cmd_context() {
+  local dir; dir="$(resolve_project "${1:-}")"; shift || true
+  local mode="${1:-show}" file="$dir/$CONTEXT_REL"
+  case "$mode" in
+    show)
+      if [ -f "$file" ]; then cat "$file"; echo; ok "$file (lo leen Opus y los agentes en cada tarea)"
+      else
+        info "$(basename "$dir") no tiene contexto todavía. Créalo con:"
+        echo "   ai context $(basename "$dir") --init       # Opus lee el proyecto y escribe un borrador"
+        echo "   ai context $(basename "$dir") --template   # plantilla vacía para rellenar a mano"
+      fi ;;
+    --template)
+      [ -f "$file" ] && die "Ya existe $file. Edítalo (o regenéralo con --force)."
+      mkdir -p "$dir/.ai"
+      sed "s/<nombre>/$(basename "$dir")/" "$AI_HOME/prompts/context-template.md" >"$file"
+      register_project "$dir"
+      ok "Plantilla creada: $file" ;;
+    --init|--force)
+      [ -f "$file" ] && [ "$mode" != --force ] && die "Ya existe $file. Para regenerarlo: ai context $(basename "$dir") --force"
+      command -v claude >/dev/null || die "Claude Code no está instalado."
+      command -v python3 >/dev/null || die "ai context --init necesita python3."
+      mkdir -p "$dir/.ai"
+      register_project "$dir"
+      info "Opus ($PLANNER_MODEL) leyendo $(basename "$dir") para escribir su contexto (solo lectura)…"
+      local tmp="$file.tmp.$$"
+      # Igual que ai plan: se ve en vivo lo que lee; el texto final va a un temporal y luego
+      # se mueve, así un fallo no deja un contexto a medias.
+      if (cd "$dir" && claude -p "$(cat "$AI_HOME/prompts/context.md")" --model "$PLANNER_MODEL" \
+          --output-format stream-json --verbose \
+          --allowedTools "Read" "Glob" "Grep" \
+          --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" "WebFetch" "WebSearch" \
+          | python3 "$AIWATCH" plan-stream /dev/null "$tmp"); then
+        mv "$tmp" "$file"
+        ok "Contexto escrito: $file"
+        echo "   Revísalo y corrígelo: es lo que leerán todos los agentes. Conviene commitearlo."
+        notify "ai · contexto listo" "$(basename "$dir"): revisa .ai/context.md"
+      else
+        rm -f "$tmp"; die "Opus no devolvió el contexto."
+      fi ;;
+    *) die "Uso: ai context <proyecto> [--init | --force | --template]" ;;
+  esac
+}
+
 # --- Panel web ---------------------------------------------------------------
 dashboard_running() { [ -f "$DASH_PID_FILE" ] && kill -0 "$(cat "$DASH_PID_FILE")" 2>/dev/null; }
 
@@ -961,6 +1023,7 @@ ${c_dim}Trabajo${c_off}
          [-i]                    …o en chat interactivo con el plan cargado
          [--from N]              …reanudando desde el paso N
   ai review <proyecto>           Opus revisa el diff que hizo el agente
+  ai context <proyecto> [--init] Contexto del proyecto (.ai/context.md) que leen todos
   ai agent list                  Agentes disponibles (agents/*.env)
   ai agent <nombre> <proy> "t"   Lanza un agente (coder, tester, reviewer, docs…)
   ai flow list                   Flujos multiagente (flows/*.env)
@@ -1003,6 +1066,7 @@ case "$cmd" in
   review)    cmd_review "$@" ;;
   agent)     cmd_agent "$@" ;;
   flow)      cmd_flow "$@" ;;
+  context)   cmd_context "$@" ;;
   _verify)   run_verify "$@" ;;    # interno: lo usa run_logged_verify vía script(1)
   chat)      cmd_chat "$@" ;;
   architect) cmd_architect "$@" ;;

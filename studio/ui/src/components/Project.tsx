@@ -3,14 +3,60 @@
 // lectura: para fusionar o borrar una rama, comandos para copiar.
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { BookOpen, Check, ChevronDown, ChevronRight, Columns2, Copy, FileMinus, FilePen, FilePlus, FileSymlink, GitBranch,
+import { BookOpen, Brain, Check, FileText, Pencil, Sparkles, ChevronDown, ChevronRight, Columns2, Copy, FileMinus, FilePen, FilePlus, FileSymlink, GitBranch,
   GitCommitHorizontal, GitMerge, Loader2, Rows3 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { BranchInfo, CommitInfo, DiffFile, DiffLine, DocEntry, ProjectGit } from "../../../shared/types.ts";
-import { getCommits, getDiff, getDoc, getDocs, getProjectGit } from "../api.ts";
+import { lazy, Suspense } from "react";
+import type { BranchInfo, CommitInfo, DiffFile, DiffLine, DocEntry, JobRequest, ProjectContext, ProjectGit } from "../../../shared/types.ts";
+import { createContextTemplate, getCommits, getContext, getDiff, getDoc, getDocs, getProjectGit, saveContext } from "../api.ts";
+
+const PlanEditor = lazy(() => import("./PlanEditor.tsx").then((m) => ({ default: m.PlanEditor })));
 import { Card, Code, cx, Empty } from "./ui.tsx";
 
-type Selection = { kind: "branch"; name: string } | { kind: "doc"; path: string } | null;
+type Selection = { kind: "branch"; name: string } | { kind: "doc"; path: string } | { kind: "context-edit" } | null;
+
+/** Contexto del proyecto (.ai/context.md): lo leen Opus y los agentes en cada tarea. */
+function ContextCard({ ctx, busy, onView, onEdit, onTemplate, onGenerate }: {
+  ctx: ProjectContext | null; busy: boolean;
+  onView: () => void; onEdit: () => void; onTemplate: () => void; onGenerate: (force: boolean) => void;
+}) {
+  const btn = "flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs hover:border-accent disabled:opacity-50";
+  return (
+    <Card title="Contexto del proyecto" icon={<Brain className="size-4 text-muted" />}>
+      {!ctx ? <Empty>Cargando…</Empty> : ctx.writable === false ? (
+        <p className="text-xs text-muted">
+          {ctx.exists ? <><button className="text-accent hover:underline" onClick={onView}>Ver .ai/context.md</button>. </> : "Sin contexto. "}
+          Este proyecto está fuera de PROJECTS_ROOT (config.env): desde la web es solo lectura. Usa <Code>ai context</Code> en la terminal.
+        </p>
+      ) : ctx.exists ? (
+        <>
+          <p className="mb-2 text-xs text-muted">
+            <Code>.ai/context.md</Code>: lo leen Opus (plan, revisión) y los agentes locales en cada tarea. Conviene commitearlo.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            <button className={btn} onClick={onView}><FileText className="size-3.5" />Ver</button>
+            <button className={btn} onClick={onEdit}><Pencil className="size-3.5" />Editar</button>
+            <button className={btn} onClick={() => onGenerate(true)} disabled={busy} title="Opus lo reescribe desde cero (1 llamada)">
+              <Sparkles className="size-3.5" />Regenerar con Opus
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="mb-2 text-xs text-muted">
+            Sin contexto todavía. Con él, los agentes siguen tus convenciones en vez de adivinarlas.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            <button className={cx(btn, "border-accent font-semibold")} onClick={() => onGenerate(false)} disabled={busy}>
+              <Sparkles className="size-3.5" />Generar con Opus
+            </button>
+            <button className={btn} onClick={onTemplate} disabled={busy}><FileText className="size-3.5" />Plantilla vacía</button>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
 
 const ago = (iso: string) => {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -237,8 +283,14 @@ function DocView({ project, path, docs, onOpen }: { project: string; path: strin
 }
 
 // --- Vista ---------------------------------------------------------------------------------
-export function ProjectView({ project, onOpenRun }: { project: string; onOpenRun: (run: string) => void }) {
+export function ProjectView({ project, onOpenRun, onLaunch }: {
+  project: string; onOpenRun: (run: string) => void; onLaunch: (req: JobRequest) => Promise<void>;
+}) {
   const [git, setGit] = useState<ProjectGit | null>(null);
+  const [ctx, setCtx] = useState<ProjectContext | null>(null);
+  const [ctxBusy, setCtxBusy] = useState(false);
+  const [ctxError, setCtxError] = useState<string | null>(null);
+  const loadContext = () => getContext(project).then(setCtx).catch(() => setCtx({ exists: false, text: "", mtime: null }));
   const [docs, setDocs] = useState<DocEntry[] | null>(null);
   const [sel, setSel] = useState<Selection>(null);
   const [error, setError] = useState<string | null>(null);
@@ -255,7 +307,11 @@ export function ProjectView({ project, onOpenRun }: { project: string; onOpenRun
       setSel((s) => s ?? (g?.branches[0] ? { kind: "branch", name: g.branches[0].name } : d[0] ? { kind: "doc", path: d[0].path } : null));
     });
   };
-  useEffect(() => { setSel(null); setGit(null); setDocs(null); load(); }, [project]);
+  useEffect(() => { setSel(null); setGit(null); setDocs(null); setCtx(null); load(); void loadContext(); }, [project]);
+  const runCtx = async (fn: () => Promise<unknown>) => {
+    setCtxBusy(true); setCtxError(null);
+    try { await fn(); } catch (e) { setCtxError((e as Error).message); } finally { setCtxBusy(false); }
+  };
 
   if (!project) return <Empty>Elige un proyecto en la barra lateral.</Empty>;
   const branch = sel?.kind === "branch" ? git?.branches.find((b) => b.name === sel.name) : undefined;
@@ -264,6 +320,12 @@ export function ProjectView({ project, onOpenRun }: { project: string; onOpenRun
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
+        <ContextCard ctx={ctx} busy={ctxBusy}
+          onView={() => setSel({ kind: "doc", path: ".ai/context.md" })}
+          onEdit={() => setSel({ kind: "context-edit" })}
+          onTemplate={() => void runCtx(async () => { await createContextTemplate(project); await loadContext(); load(); setSel({ kind: "context-edit" }); })}
+          onGenerate={(force) => void runCtx(() => onLaunch({ action: "context", project, force }))} />
+        {ctxError && <p className="rounded-lg border border-fail bg-fail-bg px-3 py-2 text-xs text-fail">{ctxError}</p>}
         <Card title="Ramas del agente" icon={<GitBranch className="size-4 text-muted" />}
           actions={<button onClick={load} className="text-xs text-accent hover:underline">actualizar</button>}>
           {error ? <p className="text-xs text-fail">{error}</p> : !git ? <Empty>Cargando…</Empty>
@@ -295,7 +357,7 @@ export function ProjectView({ project, onOpenRun }: { project: string; onOpenRun
                       <li key={d.path}>
                         <button onClick={() => setSel({ kind: "doc", path: d.path })} title={d.path}
                           className={cx("w-full truncate rounded-md px-2 py-1 text-left font-mono text-xs", sel?.kind === "doc" && sel.path === d.path ? "bg-panel-2 outline outline-1 outline-accent/70" : "hover:bg-panel-2")}>
-                          {gk === "plan" ? d.path.split("/").at(-1) : d.path}
+                          {gk === "plan" ? d.path.split("/").at(-1) : d.path === ".ai/context.md" ? "contexto (.ai/context.md)" : d.path}
                         </button>
                       </li>
                     ))}
@@ -307,7 +369,16 @@ export function ProjectView({ project, onOpenRun }: { project: string; onOpenRun
         </Card>
       </div>
       <div className="min-w-0">
-        {branch && git ? <BranchView project={project} git={git} branch={branch} onOpenRun={onOpenRun} />
+        {sel?.kind === "context-edit" && ctx?.exists ? (
+          <Card title=".ai/context.md" icon={<Pencil className="size-4 text-muted" />}>
+            <Suspense fallback={<Empty>Cargando editor…</Empty>}>
+              <PlanEditor key={ctx.mtime ?? 0} project={project} run="" text={ctx.text} mtime={ctx.mtime}
+                hint="Breve y concreto: cada línea debería evitar un error del agente."
+                save={async (text, mtime) => { await saveContext(project, text, mtime); }}
+                onClose={() => { void loadContext(); setSel({ kind: "doc", path: ".ai/context.md" }); }} />
+            </Suspense>
+          </Card>
+        ) : branch && git ? <BranchView project={project} git={git} branch={branch} onOpenRun={onOpenRun} />
           : sel?.kind === "doc" && docs ? <DocView project={project} path={sel.path} docs={docs} onOpen={(p) => setSel({ kind: "doc", path: p })} />
           : <Empty>Elige una rama o un documento.</Empty>}
       </div>

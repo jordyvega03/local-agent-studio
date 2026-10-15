@@ -173,7 +173,7 @@ export function App() {
           {view === "system" && <SystemView metrics={live.metrics} history={live.history} system={live.system} />}
           {view === "tokens" && <TokensView tokens={live.tokens} />}
           {view === "agents" && <AgentsView onUse={useAgent} onUseFlow={useFlow} />}
-          {view === "project" && <ProjectView project={sel.project} onOpenRun={(name) => select(sel.project, name)} />}
+          {view === "project" && <ProjectView project={sel.project} onOpenRun={(name) => select(sel.project, name)} onLaunch={launch} />}
           {/* Acciones: oculta (no desmontada) para que la terminal conserve el trabajo */}
           <div className={cx("grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]", view !== "actions" && "hidden")}>
             <div className="flex min-w-0 flex-col gap-4">

@@ -60,6 +60,7 @@ _ai() {
     'review:Opus revisa el diff del agente'
     'agent:Lanza un agente (coder, tester, reviewer, docs…)'
     'flow:Ejecuta un flujo multiagente'
+    'context:Contexto del proyecto (.ai/context.md)'
     'chat:Chat libre con el modelo local'
     'architect:Aider: Opus arquitecto + local editor'
     'dashboard:Panel web ligero'
@@ -78,6 +79,8 @@ _ai() {
     return
   fi
   case $words[2] in
+    context)
+      if (( CURRENT == 3 )); then _ai_projects; else compadd -- --init --force --template; fi ;;
     plan|review|chat|architect)
       (( CURRENT == 3 )) && _ai_projects ;;
     dashboard)

@@ -113,6 +113,11 @@ export function buildAction(req: JobRequest, cfg: Config, installedModels: strin
       // Interactivo: el flujo puede pararse a pedir aprobación (también se aprueba con el botón).
       return { action: "flow", argv, label: `Flujo ${flow.name}: ${short(task, 45)}`, project, interactive: flow.approve.length > 0 && !req.autoApprove };
     }
+    case "context": {
+      const project = resolveProject(req.project, cfg);
+      return { action: "context", argv: ["context", project, req.force ? "--force" : "--init"],
+        label: `Contexto con Opus · ${base(project)}`, project, interactive: false };
+    }
     case "up":
       return { action: "up", argv: ["up"], label: "Encender (ai up)", interactive: false };
     default:
